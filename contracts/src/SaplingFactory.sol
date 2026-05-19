@@ -14,14 +14,8 @@ import {ISaplingFactory} from "./ISaplingFactory.sol";
 /// @dev    Bound at construction to a `(VerifiableFactory, UserRegistry impl)`
 ///         pair from the ENSv2 staging or mainnet deployment. The factory is
 ///         admin-less, has no upgrade path, and exposes a single method:
-///         `deployRegistry(admin)`. Internally it manages a monotonically
-///         increasing nonce so the caller never has to think about CREATE2
-///         salt collisions; addresses are not predictable before deployment,
-///         which is fine for our two-transaction deploy flow (deploy
-///         registry, then in a follow-up tx deploy and wire the registrar).
-///
-///         If ENS rotates either dependency, deploy a new SaplingFactory at a
-///         new canonical address and migrate the frontend to it.
+///         `deployRegistry(admin)`. 
+
 contract SaplingFactory is ISaplingFactory {
     /// @inheritdoc ISaplingFactory
     address public immutable VERIFIABLE_FACTORY;
