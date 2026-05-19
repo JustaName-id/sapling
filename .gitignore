@@ -7,3 +7,10 @@ node_modules/
 todo.md
 ENSv2-runbook.md
 claude.md
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+contracts/deployments/
+contracts/deployments/sepolia/
+contracts/deployments/sepolia/SaplingFactory.json
+contracts/deployments/sepolia/SaplingFactory.json
