@@ -9,6 +9,7 @@ import {RegistryRolesLib} from "@ensv2/registry/libraries/RegistryRolesLib.sol";
 import {LibLabel} from "@ensv2/utils/LibLabel.sol";
 
 import {OpenRegistrar} from "../src/OpenRegistrar.sol";
+import {SaplingFactory} from "../src/SaplingFactory.sol";
 
 import {EnsV2Fixture} from "./helpers/EnsV2Fixture.sol";
 
@@ -111,6 +112,34 @@ contract SaplingFlowTest is EnsV2Fixture {
         uint256 aliceTokenId = ethRegistry.getTokenId(LibLabel.id("alice"));
         vm.prank(ALICE);
         ethRegistry.setSubregistry(aliceTokenId, aliceRegistry);
+    }
+
+    function test_e2e_aliceDeploysThroughSaplingFactory() public {
+        SaplingFactory factory = new SaplingFactory(
+            address(verifiableFactory),
+            address(userRegistryImpl)
+        );
+
+        vm.startPrank(ALICE);
+        UserRegistry aliceRegistry = UserRegistry(factory.deployRegistry(ALICE));
+        OpenRegistrar aliceRegistrar = new OpenRegistrar(aliceRegistry);
+        aliceRegistry.grantRootRoles(
+            RegistryRolesLib.ROLE_REGISTRAR,
+            address(aliceRegistrar)
+        );
+        vm.stopPrank();
+
+        uint256 aliceTokenId = ethRegistry.getTokenId(LibLabel.id("alice"));
+        vm.prank(ALICE);
+        ethRegistry.setSubregistry(aliceTokenId, aliceRegistry);
+
+        uint256 bobTokenId = aliceRegistrar.register("bob", BOB);
+
+        assertEq(
+            address(ethRegistry.getSubregistry("alice")),
+            address(aliceRegistry)
+        );
+        assertEq(aliceRegistry.ownerOf(bobTokenId), BOB);
     }
 
     function _namehash3(
