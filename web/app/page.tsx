@@ -3,9 +3,9 @@
 import {useEffect, useRef, useState} from "react";
 import {
   useAccount,
+  usePublicClient,
   useReadContract,
-  useSendTransaction,
-  useWaitForTransactionReceipt,
+  useWalletClient,
 } from "wagmi";
 import {
   encodeDeployData,
@@ -376,11 +376,13 @@ function ReviewStep({
 }
 
 /**
- * Sequential 4-step deploy flow using a *single* useSendTransaction hook
- * reused across substeps. Running multiple hook instances side-by-side caused
- * cross-instance state interference (the wallet response from one would not
- * surface on the active hook), so we serialize through one mutation slot and
- * persist each step's result in local state before resetting.
+ * Procedural deploy flow. We bypass wagmi's reactive `useSendTransaction` hook
+ * entirely — running it once per substep through useEffect caused racey
+ * hook-state interference where the wallet's tx-hash response sometimes
+ * never surfaced on the active hook. Here we drive everything from a single
+ * `async function` using `walletClient.sendTransaction` + `publicClient
+ * .waitForTransactionReceipt`. State is updated explicitly between steps,
+ * with no hook reactivity in the critical path.
  */
 function DeployFlow({
   label,
@@ -395,6 +397,9 @@ function DeployFlow({
   onComplete: (registry: Address, registrar: Address) => void;
   onReset: () => void;
 }) {
+  const {data: walletClient} = useWalletClient();
+  const publicClient = usePublicClient();
+
   const [substep, setSubstep] = useState<Substep>("registry");
   const [registry, setRegistry] = useState<Address>();
   const [registrar, setRegistrar] = useState<Address>();
@@ -405,170 +410,121 @@ function DeployFlow({
     wire: {done: false},
     done: {done: false},
   });
-
-  // We capture the active tx hash via the onSuccess callback rather than
-  // reading `send.data` — that hook field doesn't update reliably for the
-  // current wallet/connector when sendTransaction is invoked from a useEffect.
-  // The callback fires reliably; we drive everything off that.
   const [activeHash, setActiveHash] = useState<Address>();
-  const [callbackError, setCallbackError] = useState<string>();
+  const [activeMining, setActiveMining] = useState(false);
+  const [error, setError] = useState<string>();
 
-  // One-shot guard per substep — StrictMode safety.
-  const firedFor = useRef<Substep | null>(null);
+  // Run-once guard. useRef survives StrictMode dev re-invocations.
+  const startedRef = useRef(false);
 
-  const send = useSendTransaction();
-  const receipt = useWaitForTransactionReceipt({hash: activeHash});
-
-  // Concise per-tick log.
   useEffect(() => {
-    console.log(
-      `[sapling] substep=${substep} | send.status=${send.status} activeHash=${activeHash ?? "—"} | receipt.status=${receipt.status} mined=${receipt.data ? "yes" : "no"} | err=${send.error?.message ?? callbackError ?? receipt.error?.message ?? "—"} | registry=${registry ?? "—"} registrar=${registrar ?? "—"}`,
-    );
-  }, [
-    substep,
-    send.status,
-    send.error,
-    activeHash,
-    callbackError,
-    receipt.status,
-    receipt.data,
-    receipt.error,
-    registry,
-    registrar,
-  ]);
+    if (startedRef.current) return;
+    if (!walletClient || !publicClient) return;
+    startedRef.current = true;
 
-  // Firing effect.
-  useEffect(() => {
-    if (firedFor.current === substep) return;
-    if (substep === "done") return;
-
-    const onCb = {
-      onSuccess: (hash: Address) => {
-        console.log(`[sapling] [${substep}] onSuccess hash=`, hash);
-        setActiveHash(hash);
-      },
-      onError: (err: Error) => {
-        console.log(`[sapling] [${substep}] onError`, err);
-        setCallbackError(err.message);
-      },
-    };
-
-    if (substep === "registry") {
-      firedFor.current = "registry";
-      console.log("[sapling] firing 1: deployRegistry");
-      send.sendTransaction(
-        {
+    (async () => {
+      try {
+        // ── 1: deploy UserRegistry via SaplingFactory ───────────────────
+        setSubstep("registry");
+        setActiveHash(undefined);
+        setActiveMining(false);
+        console.log("[sapling] step 1: sending deployRegistry…");
+        const h1 = await walletClient.sendTransaction({
           to: SEPOLIA_ADDRESSES.saplingFactory,
           data: encodeFunctionData({
             abi: saplingFactoryAbi,
             functionName: "deployRegistry",
             args: [admin],
           }),
-        },
-        onCb,
-      );
-    } else if (substep === "registrar" && registry) {
-      firedFor.current = "registrar";
-      console.log("[sapling] firing 2: deploy OpenRegistrar", registry);
-      send.sendTransaction(
-        {
+        });
+        console.log("[sapling] step 1: hash =", h1);
+        setActiveHash(h1);
+        setActiveMining(true);
+        const r1 = await publicClient.waitForTransactionReceipt({hash: h1});
+        console.log("[sapling] step 1: mined");
+        const events1 = parseEventLogs({
+          abi: saplingFactoryAbi,
+          eventName: "RegistryDeployed",
+          logs: r1.logs,
+        });
+        const reg = events1[0]?.args.registry as Address | undefined;
+        if (!reg) throw new Error("Step 1: RegistryDeployed event not found");
+        setRegistry(reg);
+        setResults(s => ({...s, registry: {done: true, txHash: h1}}));
+
+        // ── 2: deploy OpenRegistrar ─────────────────────────────────────
+        setSubstep("registrar");
+        setActiveHash(undefined);
+        setActiveMining(false);
+        console.log("[sapling] step 2: deploying OpenRegistrar…");
+        const h2 = await walletClient.sendTransaction({
           data: encodeDeployData({
             abi: openRegistrarAbi,
             bytecode: openRegistrarBytecode,
-            args: [registry],
+            args: [reg],
           }),
-        },
-        onCb,
-      );
-    } else if (substep === "grant" && registry && registrar) {
-      firedFor.current = "grant";
-      console.log("[sapling] firing 3: grantRootRoles", {registry, registrar});
-      send.sendTransaction(
-        {
-          to: registry,
+        });
+        console.log("[sapling] step 2: hash =", h2);
+        setActiveHash(h2);
+        setActiveMining(true);
+        const r2 = await publicClient.waitForTransactionReceipt({hash: h2});
+        const reg2 = r2.contractAddress as Address | null;
+        if (!reg2) throw new Error("Step 2: contractAddress missing on receipt");
+        console.log("[sapling] step 2: registrar =", reg2);
+        setRegistrar(reg2);
+        setResults(s => ({...s, registrar: {done: true, txHash: h2}}));
+
+        // ── 3: grantRootRoles ───────────────────────────────────────────
+        setSubstep("grant");
+        setActiveHash(undefined);
+        setActiveMining(false);
+        console.log("[sapling] step 3: grantRootRoles…");
+        const h3 = await walletClient.sendTransaction({
+          to: reg,
           data: encodeFunctionData({
             abi: userRegistryAbi,
             functionName: "grantRootRoles",
-            args: [ROLE_REGISTRAR, registrar],
+            args: [ROLE_REGISTRAR, reg2],
           }),
-        },
-        onCb,
-      );
-    } else if (substep === "wire" && registry) {
-      firedFor.current = "wire";
-      console.log("[sapling] firing 4: setSubregistry", {parentTokenId, registry});
-      send.sendTransaction(
-        {
+        });
+        console.log("[sapling] step 3: hash =", h3);
+        setActiveHash(h3);
+        setActiveMining(true);
+        await publicClient.waitForTransactionReceipt({hash: h3});
+        setResults(s => ({...s, grant: {done: true, txHash: h3}}));
+
+        // ── 4: setSubregistry ───────────────────────────────────────────
+        setSubstep("wire");
+        setActiveHash(undefined);
+        setActiveMining(false);
+        console.log("[sapling] step 4: setSubregistry…");
+        const h4 = await walletClient.sendTransaction({
           to: SEPOLIA_ADDRESSES.ethRegistry,
           data: encodeFunctionData({
             abi: ethRegistryAbi,
             functionName: "setSubregistry",
-            args: [parentTokenId, registry],
+            args: [parentTokenId, reg],
           }),
-        },
-        onCb,
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [substep, registry, registrar]);
+        });
+        console.log("[sapling] step 4: hash =", h4);
+        setActiveHash(h4);
+        setActiveMining(true);
+        await publicClient.waitForTransactionReceipt({hash: h4});
+        setResults(s => ({...s, wire: {done: true, txHash: h4}}));
 
-  // Receipt-driven advancement.
-  useEffect(() => {
-    if (!receipt.data) return;
-    if (firedFor.current !== substep) return; // stale receipt
-    const txHash = activeHash;
-
-    if (substep === "registry") {
-      const events = parseEventLogs({
-        abi: saplingFactoryAbi,
-        eventName: "RegistryDeployed",
-        logs: receipt.data.logs,
-      });
-      const reg = events[0]?.args.registry as Address | undefined;
-      if (!reg) {
-        console.warn("[sapling] step 1 receipt: no RegistryDeployed event");
-        return;
+        // ── done ────────────────────────────────────────────────────────
+        setSubstep("done");
+        setActiveHash(undefined);
+        setActiveMining(false);
+        console.log("[sapling] all 4 done. registry =", reg, "registrar =", reg2);
+        onComplete(reg, reg2);
+      } catch (e) {
+        console.error("[sapling] deploy failed:", e);
+        setError(e instanceof Error ? e.message : String(e));
       }
-      console.log("[sapling] step 1 done. registry =", reg);
-      setResults(r => ({...r, registry: {done: true, txHash}}));
-      setRegistry(reg);
-      setActiveHash(undefined);
-      setSubstep("registrar");
-      return;
-    }
-
-    if (substep === "registrar") {
-      const addr = receipt.data.contractAddress as Address | null;
-      if (!addr) {
-        console.warn("[sapling] step 2 receipt has no contractAddress");
-        return;
-      }
-      console.log("[sapling] step 2 done. registrar =", addr);
-      setResults(r => ({...r, registrar: {done: true, txHash}}));
-      setRegistrar(addr);
-      setActiveHash(undefined);
-      setSubstep("grant");
-      return;
-    }
-
-    if (substep === "grant") {
-      console.log("[sapling] step 3 done");
-      setResults(r => ({...r, grant: {done: true, txHash}}));
-      setActiveHash(undefined);
-      setSubstep("wire");
-      return;
-    }
-
-    if (substep === "wire") {
-      console.log("[sapling] step 4 done");
-      if (!registry || !registrar) return;
-      setResults(r => ({...r, wire: {done: true, txHash}}));
-      setSubstep("done");
-      onComplete(registry, registrar);
-      return;
-    }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receipt.data, substep]);
+  }, [walletClient, publicClient]);
 
   return (
     <Card>
@@ -583,7 +539,7 @@ function DeployFlow({
           label="Deploy UserRegistry"
           state={stateOf("registry", substep, results.registry)}
           activeTxHash={substep === "registry" ? activeHash : undefined}
-          activeMining={substep === "registry" && receipt.isLoading}
+          activeMining={substep === "registry" && activeMining}
           finalTxHash={results.registry.txHash}
           contextAddr={registry}
         />
@@ -592,7 +548,7 @@ function DeployFlow({
           label="Deploy OpenRegistrar"
           state={stateOf("registrar", substep, results.registrar)}
           activeTxHash={substep === "registrar" ? activeHash : undefined}
-          activeMining={substep === "registrar" && receipt.isLoading}
+          activeMining={substep === "registrar" && activeMining}
           finalTxHash={results.registrar.txHash}
           contextAddr={registrar}
         />
@@ -601,7 +557,7 @@ function DeployFlow({
           label="Grant ROLE_REGISTRAR"
           state={stateOf("grant", substep, results.grant)}
           activeTxHash={substep === "grant" ? activeHash : undefined}
-          activeMining={substep === "grant" && receipt.isLoading}
+          activeMining={substep === "grant" && activeMining}
           finalTxHash={results.grant.txHash}
         />
         <SubstepRow
@@ -609,15 +565,15 @@ function DeployFlow({
           label={`Set subregistry under ${label}.eth`}
           state={stateOf("wire", substep, results.wire)}
           activeTxHash={substep === "wire" ? activeHash : undefined}
-          activeMining={substep === "wire" && receipt.isLoading}
+          activeMining={substep === "wire" && activeMining}
           finalTxHash={results.wire.txHash}
         />
 
-        {(send.error || callbackError) && (
+        {error && (
           <Alert variant="destructive">
             <AlertTitle>Transaction failed</AlertTitle>
             <AlertDescription className="text-xs break-all">
-              {send.error?.message ?? callbackError}
+              {error}
             </AlertDescription>
             <div className="mt-4">
               <Button variant="outline" size="sm" onClick={onReset}>

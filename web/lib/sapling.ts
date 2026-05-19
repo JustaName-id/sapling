@@ -4,7 +4,7 @@ import {type Address, type Abi} from "viem";
  * Canonical Sapling and ENSv2 staging addresses on Sepolia.
  */
 export const SEPOLIA_ADDRESSES = {
-  saplingFactory: "0xE491D4F2804E386d3b557d3401C0F95F7CdC7de7" as Address,
+  saplingFactory: "0x6b02c536a4f0cf6060b0069450a8ab54db0dfe09" as Address,
   ethRegistry: "0x796fFF2E907449be8D5921BCC215B1b76D89d080" as Address,
   verifiableFactory: "0x9240c5F31D747d60b3d9Aed2F57995094342B1Ed" as Address,
   userRegistryImpl: "0xEa93AFf7375E8176053ab6ab36B57cab53CbF702" as Address,
