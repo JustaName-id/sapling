@@ -14,3 +14,4 @@ contracts/deployments/
 contracts/deployments/sepolia/
 contracts/deployments/sepolia/SaplingFactory.json
 contracts/deployments/sepolia/SaplingFactory.json
+docs/

@@ -4,7 +4,6 @@ import {useEffect, useRef, useState} from "react";
 import {
   useAccount,
   usePublicClient,
-  useReadContract,
   useWalletClient,
 } from "wagmi";
 import {
@@ -35,6 +34,7 @@ import {
   openRegistrarBytecode,
 } from "@/lib/openRegistrar";
 import {labelhash} from "@/lib/labelhash";
+import {fetchOwnedEthNames} from "@/lib/ens";
 
 type Phase = "select" | "review" | "deploy" | "success";
 
@@ -45,40 +45,69 @@ type SubstepResult = {
   done: boolean;
 };
 
+type ParentInfo = {
+  /** The registry where the picked name's token lives. setSubregistry runs here. */
+  registry: Address;
+  /** The picked name's tokenId in that registry. */
+  tokenId: bigint;
+  /** Current owner of that token. */
+  owner: Address;
+  /** The label part (leaf), e.g. "leooo" for "leooo.eth", "test" for "test.11111.eth". */
+  label: string;
+};
+
 export default function Home() {
   const {address, isConnected} = useAccount();
+  const publicClient = usePublicClient();
   const [phase, setPhase] = useState<Phase>("select");
-  const [label, setLabel] = useState("");
+  const [name, setName] = useState(""); // full name, e.g. "leooo.eth" or "test.11111.eth"
+  const [parentInfo, setParentInfo] = useState<ParentInfo | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<string>();
   const [deployed, setDeployed] = useState<{
     registry: Address;
     registrar: Address;
   }>();
-  const trimmed = label.trim().toLowerCase();
 
-  const {data: parentTokenId} = useReadContract({
-    address: SEPOLIA_ADDRESSES.ethRegistry,
-    abi: ethRegistryAbi,
-    functionName: "getTokenId",
-    args: trimmed ? [labelhash(trimmed)] : undefined,
-    query: {enabled: trimmed.length > 0},
-  });
+  const normalized = normalizeName(name);
 
-  const {data: parentOwner} = useReadContract({
-    address: SEPOLIA_ADDRESSES.ethRegistry,
-    abi: ethRegistryAbi,
-    functionName: "ownerOf",
-    args: parentTokenId ? [parentTokenId] : undefined,
-    query: {enabled: parentTokenId !== undefined},
-  });
+  // Walk the registry chain to find which registry holds the picked name.
+  useEffect(() => {
+    if (!normalized || !publicClient) {
+      setParentInfo(null);
+      setResolveError(undefined);
+      return;
+    }
+    let cancelled = false;
+    setResolving(true);
+    setResolveError(undefined);
+    (async () => {
+      try {
+        const info = await resolveParent(normalized, publicClient);
+        if (cancelled) return;
+        setParentInfo(info);
+      } catch (e) {
+        if (cancelled) return;
+        console.warn("[sapling] resolveParent failed", e);
+        setResolveError(e instanceof Error ? e.message : String(e));
+        setParentInfo(null);
+      } finally {
+        if (!cancelled) setResolving(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [normalized, publicClient]);
 
   const ownsParent =
     !!address &&
-    !!parentOwner &&
-    address.toLowerCase() === parentOwner.toLowerCase();
+    !!parentInfo &&
+    address.toLowerCase() === parentInfo.owner.toLowerCase();
 
   function reset() {
     setPhase("select");
-    setLabel("");
+    setName("");
     setDeployed(undefined);
   }
 
@@ -121,29 +150,34 @@ export default function Home() {
 
           {phase === "select" && (
             <SelectStep
-              label={label}
-              setLabel={setLabel}
-              parentOwner={parentOwner as Address | undefined}
+              name={name}
+              setName={setName}
+              normalized={normalized}
+              parentInfo={parentInfo}
+              resolving={resolving}
+              resolveError={resolveError}
               ownsParent={ownsParent}
               address={address}
               onNext={() => setPhase("review")}
             />
           )}
 
-          {phase === "review" && (
+          {phase === "review" && parentInfo && (
             <ReviewStep
-              label={trimmed}
+              name={normalized}
+              parentInfo={parentInfo}
               admin={address!}
               onBack={() => setPhase("select")}
               onConfirm={() => setPhase("deploy")}
             />
           )}
 
-          {phase === "deploy" && (
+          {phase === "deploy" && parentInfo && (
             <DeployFlow
-              label={trimmed}
+              name={normalized}
               admin={address!}
-              parentTokenId={parentTokenId as bigint}
+              parentRegistry={parentInfo.registry}
+              parentTokenId={parentInfo.tokenId}
               onComplete={(registry, registrar) => {
                 setDeployed({registry, registrar});
                 setPhase("success");
@@ -154,7 +188,7 @@ export default function Home() {
 
           {phase === "success" && deployed && (
             <SuccessStep
-              label={trimmed}
+              name={normalized}
               registry={deployed.registry}
               registrar={deployed.registrar}
               onAnother={reset}
@@ -164,6 +198,66 @@ export default function Home() {
       )}
     </main>
   );
+}
+
+/** Add `.eth` suffix if missing, normalize case + whitespace. */
+function normalizeName(input: string): string {
+  const t = input.trim().toLowerCase();
+  if (!t) return "";
+  return t.endsWith(".eth") ? t : `${t}.eth`;
+}
+
+/**
+ * Walk the registry chain from the `.eth` root down to the registry that
+ * holds the picked name's leaf label, returning that registry + the leaf's
+ * tokenId + current owner.
+ *
+ * For "leooo.eth": parentRegistry = ethRegistry, label = "leooo".
+ * For "test.11111.eth": parentRegistry = ethRegistry.getSubregistry("11111"),
+ *                       label = "test".
+ */
+async function resolveParent(
+  fullName: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  publicClient: any,
+): Promise<ParentInfo> {
+  const labels = fullName.split(".");
+  if (labels[labels.length - 1] !== "eth")
+    throw new Error("must end with .eth");
+  if (labels.length < 2) throw new Error("name too short");
+
+  const leafLabel = labels[0];
+  // Labels between the leaf and the .eth root, ordered outermost-first.
+  const middle = labels.slice(1, -1).reverse();
+
+  let current: Address = SEPOLIA_ADDRESSES.ethRegistry;
+  for (const lbl of middle) {
+    const next = (await publicClient.readContract({
+      address: current,
+      abi: ethRegistryAbi,
+      functionName: "getSubregistry",
+      args: [lbl],
+    })) as Address;
+    if (next === "0x0000000000000000000000000000000000000000")
+      throw new Error(`no subregistry for "${lbl}" — parent chain broken`);
+    current = next;
+  }
+
+  const tokenId = (await publicClient.readContract({
+    address: current,
+    abi: ethRegistryAbi,
+    functionName: "getTokenId",
+    args: [labelhash(leafLabel)],
+  })) as bigint;
+
+  const owner = (await publicClient.readContract({
+    address: current,
+    abi: ethRegistryAbi,
+    functionName: "ownerOf",
+    args: [tokenId],
+  })) as Address;
+
+  return {registry: current, tokenId, owner, label: leafLabel};
 }
 
 function PhaseIndicator({phase}: {phase: Phase}) {
@@ -205,31 +299,46 @@ function PhaseIndicator({phase}: {phase: Phase}) {
 }
 
 function SelectStep({
-  label,
-  setLabel,
-  parentOwner,
+  name,
+  setName,
+  normalized,
+  parentInfo,
+  resolving,
+  resolveError,
   ownsParent,
   address,
   onNext,
 }: {
-  label: string;
-  setLabel: (v: string) => void;
-  parentOwner: Address | undefined;
+  name: string;
+  setName: (v: string) => void;
+  normalized: string;
+  parentInfo: ParentInfo | null;
+  resolving: boolean;
+  resolveError?: string;
   ownsParent: boolean;
   address: Address | undefined;
   onNext: () => void;
 }) {
-  const trimmed = label.trim().toLowerCase();
-  const looksValid = /^[a-z0-9-]{3,}$/.test(trimmed);
+  const [ownedNames, setOwnedNames] = useState<string[]>([]);
+  const [namesStatus, setNamesStatus] = useState<
+    "idle" | "loading" | "loaded" | "error"
+  >("idle");
 
-  let status: "idle" | "checking" | "owns" | "not-owner" | "not-registered" =
-    "idle";
-  if (!trimmed || !looksValid) status = "idle";
-  else if (parentOwner === undefined) status = "checking";
-  else if (parentOwner === "0x0000000000000000000000000000000000000000")
-    status = "not-registered";
-  else if (ownsParent) status = "owns";
-  else status = "not-owner";
+  useEffect(() => {
+    if (!address) return;
+    setNamesStatus("loading");
+    fetchOwnedEthNames(address)
+      .then(names => {
+        setOwnedNames(names);
+        setNamesStatus("loaded");
+      })
+      .catch(err => {
+        console.warn("[sapling] ens graph fetch failed", err);
+        setNamesStatus("error");
+      });
+  }, [address]);
+
+  const canContinue = ownsParent && !!parentInfo;
 
   return (
     <Card>
@@ -239,47 +348,90 @@ function SelectStep({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="label">Your parent name</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              id="label"
-              autoFocus
-              spellCheck={false}
-              placeholder="alice"
-              value={label}
-              onChange={e => setLabel(e.target.value)}
-              className="font-mono"
-            />
-            <span className="text-muted-foreground font-mono">.eth</span>
+        {namesStatus === "loading" && (
+          <div className="text-muted-foreground inline-flex items-center gap-2 text-sm">
+            <Loader2 className="size-3 animate-spin" />
+            Finding your ENS names…
           </div>
-          <p className="text-muted-foreground text-xs">
-            We&apos;ll deploy a UserRegistry under{" "}
-            <span className="font-mono">{trimmed || "your"}.eth</span>, an
-            OpenRegistrar bound to it, grant the registrar role, and wire it
-            under <span className="font-mono">.eth</span>.
-          </p>
-        </div>
-
-        {status === "checking" && (
-          <Alert>
-            <AlertDescription>Checking ownership on Sepolia…</AlertDescription>
-          </Alert>
         )}
-        {status === "not-registered" && (
-          <Alert variant="destructive">
-            <AlertTitle>Not registered</AlertTitle>
+
+        {namesStatus === "loaded" && ownedNames.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <span className="text-muted-foreground text-xs uppercase tracking-wider">
+              Your names ({ownedNames.length})
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {ownedNames.map(n => {
+                const selected = normalized === n;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setName(n)}
+                    data-selected={selected}
+                    className="data-[selected=true]:border-foreground data-[selected=true]:bg-foreground data-[selected=true]:text-background border-border hover:bg-muted rounded-full border px-3 py-1.5 font-mono text-sm transition-colors"
+                  >
+                    {n}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {namesStatus === "loaded" && ownedNames.length === 0 && (
+          <Alert>
+            <AlertTitle>No names found</AlertTitle>
             <AlertDescription>
-              <span className="font-mono">{trimmed}.eth</span> isn&apos;t
-              registered on Sepolia ENSv2 staging yet.
+              The ENS staging indexer doesn&apos;t see any names owned by this
+              wallet. You can still type one manually below.
             </AlertDescription>
           </Alert>
         )}
-        {status === "not-owner" && parentOwner && (
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="name">
+            {ownedNames.length > 0 ? "Or type a name" : "Your parent name"}
+          </Label>
+          <Input
+            id="name"
+            autoFocus
+            spellCheck={false}
+            placeholder="alice.eth or sub.alice.eth"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            className="font-mono"
+          />
+          <p className="text-muted-foreground text-xs">
+            We&apos;ll deploy a UserRegistry under{" "}
+            <span className="font-mono">{normalized || "your.name.eth"}</span>,
+            an OpenRegistrar bound to it, grant the registrar role, and wire it
+            under the registry that holds{" "}
+            <span className="font-mono">{normalized || "the name"}</span>.
+          </p>
+        </div>
+
+        {resolving && normalized && (
+          <Alert>
+            <AlertDescription className="inline-flex items-center gap-2">
+              <Loader2 className="size-3 animate-spin" />
+              Resolving parent registry chain on Sepolia…
+            </AlertDescription>
+          </Alert>
+        )}
+        {resolveError && (
+          <Alert variant="destructive">
+            <AlertTitle>Can&apos;t resolve</AlertTitle>
+            <AlertDescription className="text-xs">
+              {resolveError}
+            </AlertDescription>
+          </Alert>
+        )}
+        {parentInfo && !ownsParent && (
           <Alert variant="destructive">
             <AlertTitle>Different wallet owns this</AlertTitle>
             <AlertDescription className="font-mono text-xs">
-              {parentOwner}
+              {parentInfo.owner}
               <br />
               <span className="text-muted-foreground">
                 connected: {address}
@@ -287,17 +439,21 @@ function SelectStep({
             </AlertDescription>
           </Alert>
         )}
-        {status === "owns" && (
+        {parentInfo && ownsParent && (
           <Alert>
             <AlertTitle>You own this name</AlertTitle>
-            <AlertDescription>
-              You&apos;re ready to deploy a subregistry under it.
+            <AlertDescription className="flex flex-col gap-1">
+              <span>You&apos;re ready to deploy a subregistry under it.</span>
+              <span className="text-muted-foreground font-mono text-xs">
+                parent registry: {parentInfo.registry.slice(0, 10)}…
+                {parentInfo.registry.slice(-6)}
+              </span>
             </AlertDescription>
           </Alert>
         )}
 
         <div className="flex justify-end">
-          <Button disabled={status !== "owns"} onClick={onNext}>
+          <Button disabled={!canContinue} onClick={onNext}>
             Continue
           </Button>
         </div>
@@ -307,12 +463,14 @@ function SelectStep({
 }
 
 function ReviewStep({
-  label,
+  name,
+  parentInfo,
   admin,
   onBack,
   onConfirm,
 }: {
-  label: string;
+  name: string;
+  parentInfo: ParentInfo;
   admin: Address;
   onBack: () => void;
   onConfirm: () => void;
@@ -326,10 +484,13 @@ function ReviewStep({
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
         <Field label="Name">
-          <span className="font-mono">{label}.eth</span>
+          <span className="font-mono">{name}</span>
         </Field>
         <Field label="Admin (full control)">
           <span className="font-mono text-xs">{admin}</span>
+        </Field>
+        <Field label="Parent registry (where setSubregistry runs)">
+          <span className="font-mono text-xs">{parentInfo.registry}</span>
         </Field>
         <Field label="Network">
           <Badge variant="secondary">Sepolia</Badge>
@@ -356,10 +517,10 @@ function ReviewStep({
             </li>
             <li>
               <code className="font-mono">
-                ethRegistry.setSubregistry({label}, registry)
+                parentRegistry.setSubregistry({parentInfo.label}, registry)
               </code>{" "}
-              — wire the registry under{" "}
-              <span className="font-mono">.eth</span>.
+              — wire the new registry as the subregistry of{" "}
+              <span className="font-mono">{name}</span>.
             </li>
           </ol>
         </div>
@@ -385,14 +546,16 @@ function ReviewStep({
  * with no hook reactivity in the critical path.
  */
 function DeployFlow({
-  label,
+  name,
   admin,
+  parentRegistry,
   parentTokenId,
   onComplete,
   onReset,
 }: {
-  label: string;
+  name: string;
   admin: Address;
+  parentRegistry: Address;
   parentTokenId: bigint;
   onComplete: (registry: Address, registrar: Address) => void;
   onReset: () => void;
@@ -493,13 +656,13 @@ function DeployFlow({
         await publicClient.waitForTransactionReceipt({hash: h3});
         setResults(s => ({...s, grant: {done: true, txHash: h3}}));
 
-        // ── 4: setSubregistry ───────────────────────────────────────────
+        // ── 4: setSubregistry on the parent registry ────────────────────
         setSubstep("wire");
         setActiveHash(undefined);
         setActiveMining(false);
-        console.log("[sapling] step 4: setSubregistry…");
+        console.log("[sapling] step 4: setSubregistry on", parentRegistry);
         const h4 = await walletClient.sendTransaction({
-          to: SEPOLIA_ADDRESSES.ethRegistry,
+          to: parentRegistry,
           data: encodeFunctionData({
             abi: ethRegistryAbi,
             functionName: "setSubregistry",
@@ -562,7 +725,7 @@ function DeployFlow({
         />
         <SubstepRow
           n={4}
-          label={`Set subregistry under ${label}.eth`}
+          label={`Set subregistry under ${name}`}
           state={stateOf("wire", substep, results.wire)}
           activeTxHash={substep === "wire" ? activeHash : undefined}
           activeMining={substep === "wire" && activeMining}
@@ -675,12 +838,12 @@ function SubstepRow({
 }
 
 function SuccessStep({
-  label,
+  name,
   registry,
   registrar,
   onAnother,
 }: {
-  label: string;
+  name: string;
   registry: Address;
   registrar: Address;
   onAnother: () => void;
@@ -689,13 +852,13 @@ function SuccessStep({
     <Card>
       <CardHeader>
         <CardTitle className="text-2xl font-semibold tracking-tight">
-          Live on <span className="font-mono">{label}.eth</span>
+          Live on <span className="font-mono">{name}</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
         <p>
           Anyone can now mint a subname under{" "}
-          <span className="font-mono">{label}.eth</span> via your OpenRegistrar.
+          <span className="font-mono">{name}</span> via your OpenRegistrar.
           Resolution walks the tree natively on Sepolia.
         </p>
 
@@ -727,11 +890,11 @@ function SuccessStep({
             Visit{" "}
             <a
               className="underline"
-              href={`https://explorer.ens.dev/${label}.eth/subnames`}
+              href={`https://explorer.ens.dev/${name}/subnames`}
               target="_blank"
               rel="noreferrer"
             >
-              explorer.ens.dev/{label}.eth/subnames
+              explorer.ens.dev/{name}/subnames
             </a>{" "}
             to see your subnames appear as they&apos;re minted.
           </AlertDescription>
