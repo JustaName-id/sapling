@@ -11,6 +11,7 @@ import {LibLabel} from "@ensv2/utils/LibLabel.sol";
 
 import {OpenRegistrar} from "../src/OpenRegistrar.sol";
 import {IOpenRegistrar} from "../src/IOpenRegistrar.sol";
+import {ISaplingRegistrar} from "../src/ISaplingRegistrar.sol";
 
 import {EnsV2Fixture} from "./helpers/EnsV2Fixture.sol";
 
@@ -39,7 +40,7 @@ contract OpenRegistrarTest is EnsV2Fixture {
     }
 
     function test_constructor_revertsWhen_registryZero() public {
-        vm.expectRevert(IOpenRegistrar.ZeroRegistry.selector);
+        vm.expectRevert(ISaplingRegistrar.ZeroRegistry.selector);
         new OpenRegistrar(IPermissionedRegistry(address(0)));
     }
 

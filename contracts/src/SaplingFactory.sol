@@ -10,13 +10,11 @@ import {ISaplingFactory} from "./ISaplingFactory.sol";
 
 /// @title SaplingFactory
 /// @notice Canonical entry point for deploying Sapling user registries.
-///
-/// @dev    Bound at construction to a `(VerifiableFactory, UserRegistry impl)`
-///         pair from the ENSv2 staging or mainnet deployment. The factory is
-///         admin-less, has no upgrade path, and exposes a single method:
-///         `deployRegistry(admin)`. 
-
 contract SaplingFactory is ISaplingFactory {
+    /*//////////////////////////////////////////////////////////////
+                            STATE VARIABLES
+    //////////////////////////////////////////////////////////////*/
+
     /// @inheritdoc ISaplingFactory
     address public immutable VERIFIABLE_FACTORY;
 
@@ -29,29 +27,30 @@ contract SaplingFactory is ISaplingFactory {
     /// @inheritdoc ISaplingFactory
     string public constant VERSION = "1.0.0";
 
-    /// @dev Monotonic per-factory nonce used to derive a unique
-    ///      VerifiableFactory salt for each deployment.
     uint256 private _nonce;
+
+    /*//////////////////////////////////////////////////////////////
+                              CONSTRUCTOR
+    //////////////////////////////////////////////////////////////*/
 
     constructor(address verifiableFactory_, address userRegistryImpl_) {
         VERIFIABLE_FACTORY = verifiableFactory_;
         USER_REGISTRY_IMPL = userRegistryImpl_;
     }
 
+    /*//////////////////////////////////////////////////////////////
+                            PUBLIC FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
     /// @inheritdoc ISaplingFactory
     function deployRegistry(address admin) public returns (address registry) {
         if (admin == address(0)) revert ZeroAdmin();
 
-        bytes memory init = abi.encodeCall(
-            UserRegistry.initialize,
-            (admin, EACBaseRolesLib.ALL_ROLES)
-        );
+        bytes memory init =
+            abi.encodeCall(UserRegistry.initialize, (admin, EACBaseRolesLib.ALL_ROLES));
 
-        registry = VerifiableFactory(VERIFIABLE_FACTORY).deployProxy(
-            USER_REGISTRY_IMPL,
-            ++_nonce,
-            init
-        );
+        registry =
+            VerifiableFactory(VERIFIABLE_FACTORY).deployProxy(USER_REGISTRY_IMPL, ++_nonce, init);
 
         emit RegistryDeployed(admin, registry, msg.sender);
     }
