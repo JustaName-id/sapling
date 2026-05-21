@@ -121,7 +121,7 @@ contract SaplingFlowTest is EnsV2Fixture {
         );
 
         vm.startPrank(ALICE);
-        UserRegistry aliceRegistry = UserRegistry(factory.deployRegistry(ALICE));
+        UserRegistry aliceRegistry = UserRegistry(factory.deployRegistry(ALICE, 1));
         OpenRegistrar aliceRegistrar = new OpenRegistrar(aliceRegistry);
         aliceRegistry.grantRootRoles(
             RegistryRolesLib.ROLE_REGISTRAR,

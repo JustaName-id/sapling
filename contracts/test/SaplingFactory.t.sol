@@ -19,15 +19,15 @@ contract SaplingFactoryTest is EnsV2Fixture {
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
 
+    uint256 internal constant SALT_A = 1;
+    uint256 internal constant SALT_B = 2;
+
     bytes32 internal constant REGISTRY_DEPLOYED_SIG =
         keccak256("RegistryDeployed(address,address,address)");
 
     function setUp() public {
         deployEnsV2Fixture();
-        saplingFactory = new SaplingFactory(
-            address(verifiableFactory),
-            address(userRegistryImpl)
-        );
+        saplingFactory = new SaplingFactory(address(verifiableFactory), address(userRegistryImpl));
     }
 
     function test_metadata_exposesAddressesAndVersion() public view {
@@ -38,94 +38,102 @@ contract SaplingFactoryTest is EnsV2Fixture {
     }
 
     function test_deployRegistry_returnsUsableProxy() public {
-        address registry = saplingFactory.deployRegistry(ALICE);
+        address registry = saplingFactory.deployRegistry(ALICE, SALT_A);
         assertTrue(registry != address(0));
         assertTrue(registry.code.length > 0);
     }
 
     function test_deployRegistry_grantsAllRolesToAdmin() public {
-        address registry = saplingFactory.deployRegistry(ALICE);
+        address registry = saplingFactory.deployRegistry(ALICE, SALT_A);
 
         assertTrue(
-            IPermissionedRegistry(registry).hasRoles(
-                0, RegistryRolesLib.ROLE_REGISTRAR, ALICE
-            )
+            IPermissionedRegistry(registry).hasRoles(0, RegistryRolesLib.ROLE_REGISTRAR, ALICE)
         );
         assertTrue(
-            IPermissionedRegistry(registry).hasRoles(
-                0, RegistryRolesLib.ROLE_SET_SUBREGISTRY, ALICE
-            )
+            IPermissionedRegistry(registry)
+                .hasRoles(0, RegistryRolesLib.ROLE_SET_SUBREGISTRY, ALICE)
         );
         assertTrue(
-            IPermissionedRegistry(registry).hasRoles(
-                0, RegistryRolesLib.ROLE_SET_RESOLVER, ALICE
-            )
+            IPermissionedRegistry(registry).hasRoles(0, RegistryRolesLib.ROLE_SET_RESOLVER, ALICE)
         );
     }
 
     function test_deployRegistry_callerHasNoRolesByDefault() public {
-        address registry = saplingFactory.deployRegistry(ALICE);
+        address registry = saplingFactory.deployRegistry(ALICE, SALT_A);
 
         assertFalse(
-            IPermissionedRegistry(registry).hasRoles(
-                0, RegistryRolesLib.ROLE_REGISTRAR, address(saplingFactory)
-            )
+            IPermissionedRegistry(registry)
+                .hasRoles(0, RegistryRolesLib.ROLE_REGISTRAR, address(saplingFactory))
         );
         assertFalse(
-            IPermissionedRegistry(registry).hasRoles(
-                0, RegistryRolesLib.ROLE_REGISTRAR, address(this)
-            )
+            IPermissionedRegistry(registry)
+                .hasRoles(0, RegistryRolesLib.ROLE_REGISTRAR, address(this))
         );
     }
 
     function test_deployRegistry_adminCanMintDirectly() public {
-        address registry = saplingFactory.deployRegistry(ALICE);
+        address registry = saplingFactory.deployRegistry(ALICE, SALT_A);
 
         vm.prank(ALICE);
-        uint256 tokenId = UserRegistry(registry).register(
-            "bob",
-            BOB,
-            IPermissionedRegistry(address(0)),
-            address(0),
-            EACBaseRolesLib.ALL_ROLES,
-            type(uint64).max
-        );
+        uint256 tokenId = UserRegistry(registry)
+            .register(
+                "bob",
+                BOB,
+                IPermissionedRegistry(address(0)),
+                address(0),
+                EACBaseRolesLib.ALL_ROLES,
+                type(uint64).max
+            );
 
         assertEq(IPermissionedRegistry(registry).ownerOf(tokenId), BOB);
     }
 
     function test_deployRegistry_defaultsAdminToSender() public {
         vm.prank(ALICE);
-        address registry = saplingFactory.deployRegistry();
+        address registry = saplingFactory.deployRegistry(SALT_A);
 
         assertTrue(
-            IPermissionedRegistry(registry).hasRoles(
-                0, RegistryRolesLib.ROLE_REGISTRAR, ALICE
-            )
+            IPermissionedRegistry(registry).hasRoles(0, RegistryRolesLib.ROLE_REGISTRAR, ALICE)
         );
     }
 
     function test_deployRegistry_revertsWhen_adminZero() public {
         vm.expectRevert(ISaplingFactory.ZeroAdmin.selector);
-        saplingFactory.deployRegistry(address(0));
+        saplingFactory.deployRegistry(address(0), SALT_A);
     }
 
-    function test_deployRegistry_consecutiveCallsProduceDistinctRegistries() public {
-        address a = saplingFactory.deployRegistry(ALICE);
-        address b = saplingFactory.deployRegistry(ALICE);
-        address c = saplingFactory.deployRegistry(ALICE);
+    function test_deployRegistry_distinctSaltsProduceDistinctRegistries() public {
+        address a = saplingFactory.deployRegistry(ALICE, SALT_A);
+        address b = saplingFactory.deployRegistry(ALICE, SALT_B);
+        address c = saplingFactory.deployRegistry(ALICE, 3);
         assertTrue(a != b);
         assertTrue(b != c);
         assertTrue(a != c);
     }
 
-    function test_deployRegistry_differentCallersDoNotCollide() public {
-        address fromTest = saplingFactory.deployRegistry(ALICE);
+    function test_deployRegistry_sameSaltDifferentAdminProducesDistinctAddress() public {
+        address forAlice = saplingFactory.deployRegistry(ALICE, SALT_A);
+        address forBob = saplingFactory.deployRegistry(BOB, SALT_A);
+        assertTrue(forAlice != forBob);
+    }
 
+    function test_deployRegistry_isCallerIndependent() public {
+        address fromTest = saplingFactory.deployRegistry(ALICE, SALT_A);
+
+        SaplingFactory secondFactory =
+            new SaplingFactory(address(verifiableFactory), address(userRegistryImpl));
         vm.prank(BOB);
-        address fromBob = saplingFactory.deployRegistry(BOB);
+        address viaBobOnSecondFactory = secondFactory.deployRegistry(ALICE, SALT_A);
 
-        assertTrue(fromTest != fromBob);
+        // Different factory addresses give different deploy addresses, even with same (admin, salt).
+        // The point is: the deploy address is determined by (admin, salt, factory), not by msg.sender to the factory.
+        assertTrue(fromTest != viaBobOnSecondFactory);
+    }
+
+    function test_deployRegistry_sameAdminAndSaltOnSameFactoryReverts() public {
+        saplingFactory.deployRegistry(ALICE, SALT_A);
+        vm.expectRevert();
+        saplingFactory.deployRegistry(ALICE, SALT_A);
     }
 
     function test_deployRegistry_emitsRegistryDeployedEvent() public {
@@ -133,7 +141,7 @@ contract SaplingFactoryTest is EnsV2Fixture {
 
         vm.recordLogs();
         vm.prank(caller);
-        address registry = saplingFactory.deployRegistry(ALICE);
+        address registry = saplingFactory.deployRegistry(ALICE, SALT_A);
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
         bool found;

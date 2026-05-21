@@ -54,7 +54,7 @@ contract DeployLeoooEth is Script {
         console2.log("1. SaplingFactory deployed:    ", address(factory));
 
         // 2. Deploy the user's UserRegistry through the factory.
-        address userRegistry = factory.deployRegistry(admin);
+        address userRegistry = factory.deployRegistry(admin, 1);
         console2.log("2. UserRegistry proxy deployed:", userRegistry);
 
         // 3. Deploy a per-domain OpenRegistrar bound to the new registry.

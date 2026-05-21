@@ -27,8 +27,6 @@ contract SaplingFactory is ISaplingFactory {
     /// @inheritdoc ISaplingFactory
     string public constant VERSION = "1.0.0";
 
-    uint256 private _nonce;
-
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
@@ -43,20 +41,21 @@ contract SaplingFactory is ISaplingFactory {
     //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc ISaplingFactory
-    function deployRegistry(address admin) public returns (address registry) {
+    function deployRegistry(address admin, uint256 salt) public returns (address registry) {
         if (admin == address(0)) revert ZeroAdmin();
 
+        uint256 namespacedSalt = uint256(keccak256(abi.encode(admin, salt)));
         bytes memory init =
             abi.encodeCall(UserRegistry.initialize, (admin, EACBaseRolesLib.ALL_ROLES));
 
-        registry =
-            VerifiableFactory(VERIFIABLE_FACTORY).deployProxy(USER_REGISTRY_IMPL, ++_nonce, init);
+        registry = VerifiableFactory(VERIFIABLE_FACTORY)
+            .deployProxy(USER_REGISTRY_IMPL, namespacedSalt, init);
 
         emit RegistryDeployed(admin, registry, msg.sender);
     }
 
     /// @inheritdoc ISaplingFactory
-    function deployRegistry() external returns (address) {
-        return deployRegistry(msg.sender);
+    function deployRegistry(uint256 salt) external returns (address) {
+        return deployRegistry(msg.sender, salt);
     }
 }

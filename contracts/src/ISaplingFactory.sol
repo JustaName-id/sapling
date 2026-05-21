@@ -33,11 +33,13 @@ interface ISaplingFactory {
     /// @notice Semantic version of this factory implementation.
     function VERSION() external view returns (string memory);
 
-    /// @notice Deploy a new UserRegistry proxy with `msg.sender` as admin.
-    function deployRegistry() external returns (address registry);
+    /// @notice Deploy a UserRegistry with `msg.sender` as admin and salt namespaced to them.
+    /// @param salt User-chosen salt; identifies this deploy within `msg.sender`'s namespace.
+    function deployRegistry(uint256 salt) external returns (address registry);
 
-    /// @notice Deploy a new UserRegistry proxy for `admin`.
+    /// @notice Deploy a UserRegistry. Address is deterministic in `(admin, salt)`.
     /// @param admin Address granted ALL_ROLES at the registry root.
+    /// @param salt Caller-chosen salt; identifies this deploy within `admin`'s namespace.
     /// @return registry The deployed UserRegistry proxy address.
-    function deployRegistry(address admin) external returns (address registry);
+    function deployRegistry(address admin, uint256 salt) external returns (address registry);
 }
