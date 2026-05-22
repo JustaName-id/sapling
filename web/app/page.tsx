@@ -69,6 +69,7 @@ export default function Home() {
   const [deployed, setDeployed] = useState<{
     registry: Address;
     registrar: Address;
+    txHash?: string;
   }>();
 
   // Keep admin synced to connected wallet until user touches it.
@@ -205,6 +206,7 @@ export default function Home() {
             network={network}
             registry={deployed.registry}
             registrar={deployed.registrar}
+            txHash={deployed.txHash}
             onReset={reset}
           />
         ) : step === 1 ? (
@@ -255,7 +257,9 @@ export default function Home() {
             network={network}
             registry={registry}
             registrar={registrar}
-            onDone={(r, reg) => setDeployed({registry: r, registrar: reg})}
+            onDone={(r, reg, tx) =>
+              setDeployed({registry: r, registrar: reg, txHash: tx})
+            }
             onBack={() => goto(3)}
           />
         ) : (

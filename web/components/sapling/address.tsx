@@ -12,11 +12,14 @@ export function Address({
   value,
   short = true,
   showCopy = true,
+  explorerHref,
   className,
 }: {
   value: string;
   short?: boolean;
   showCopy?: boolean;
+  /** When provided, renders an external-link icon button next to copy. */
+  explorerHref?: string;
   className?: string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -72,6 +75,32 @@ export function Address({
             </svg>
           )}
         </button>
+      )}
+      {explorerHref && (
+        <a
+          href={explorerHref}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="View on block explorer"
+          title="View on explorer"
+          onClick={e => e.stopPropagation()}
+          className="appearance-none p-1 rounded-[4px] inline-flex text-fg-4 hover:text-fg-2 hover:bg-bg-sunk transition-colors"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M5 11L11 5M11 5H6.5M11 5V9.5"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+            <path
+              d="M9.5 2.5h-6A1 1 0 0 0 2.5 3.5v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-6"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+            />
+          </svg>
+        </a>
       )}
     </span>
   );

@@ -8,12 +8,15 @@ export function SuccessScreen({
   network,
   registry,
   registrar,
+  txHash,
   onReset,
 }: {
   parent: string;
   network: "mainnet" | "sepolia";
   registry: Address;
   registrar: Address;
+  /** Final wiring tx — `setSubregistry` (sequential) or the bundled tx (atomic). */
+  txHash?: string;
   onReset: () => void;
 }) {
   const explorer =
@@ -55,10 +58,18 @@ export function SuccessScreen({
 
       <div className="grid gap-3">
         <RecordRow k="UserRegistry">
-          <AddrPill value={registry} short={false} />
+          <AddrPill
+            value={registry}
+            short={false}
+            explorerHref={`${explorer}/address/${registry}`}
+          />
         </RecordRow>
         <RecordRow k="Registrar">
-          <AddrPill value={registrar} short={false} />
+          <AddrPill
+            value={registrar}
+            short={false}
+            explorerHref={`${explorer}/address/${registrar}`}
+          />
         </RecordRow>
         <RecordRow k="Parent">
           <span className="font-mono">{parent}</span>
@@ -72,23 +83,25 @@ export function SuccessScreen({
       </div>
 
       <div className="mt-10 flex justify-end items-center gap-3">
-        <a
-          href={`${explorer}/address/${registry}`}
-          target="_blank"
-          rel="noreferrer"
-          className="sapling-btn"
-          data-variant="secondary"
-        >
-          View on Etherscan
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-            <path
-              d="M3 9L9 3M9 3H4M9 3V8"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-            />
-          </svg>
-        </a>
+        {txHash && (
+          <a
+            href={`${explorer}/tx/${txHash}`}
+            target="_blank"
+            rel="noreferrer"
+            className="sapling-btn"
+            data-variant="secondary"
+          >
+            View tx on Etherscan
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path
+                d="M3 9L9 3M9 3H4M9 3V8"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+          </a>
+        )}
         <button
           type="button"
           className="sapling-btn"

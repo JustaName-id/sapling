@@ -52,7 +52,11 @@ export function DeployScreen({
   network: "mainnet" | "sepolia";
   registry: RegistryConfig;
   registrar: RegistrarConfig;
-  onDone: (registryAddr: Address, registrarAddr: Address) => void;
+  onDone: (
+    registryAddr: Address,
+    registrarAddr: Address,
+    txHash?: string,
+  ) => void;
   onBack: () => void;
 }) {
   const {data: walletClient} = useWalletClient();
@@ -314,7 +318,13 @@ export function DeployScreen({
       }
       setStatuses(Object.fromEntries(calls.map((_, i) => [i, "confirmed"])));
       setPhase("done");
-      onDone(predictedRegistry, predictedRegistrar);
+      // For atomic batches every call shares one tx hash, so the last receipt
+      // is "the" batch tx. Fall back to the first receipt's hash for non-atomic.
+      const finalHash =
+        (receipts[receipts.length - 1]?.transactionHash ?? fallbackHash) as
+          | string
+          | undefined;
+      onDone(predictedRegistry, predictedRegistrar, finalHash);
     } catch (e) {
       console.error("[sapling] batched deploy failed:", e);
       setError(e instanceof Error ? e.message : String(e));
@@ -408,6 +418,7 @@ export function DeployScreen({
         idx++;
       }
 
+      let finalHash: Address | undefined;
       {
         const curIdx = idx;
         if (!registryAddr) throw new Error("registry missing for setSubregistry");
@@ -420,6 +431,7 @@ export function DeployScreen({
             args: [parentInfo.tokenId, registryAddr],
           }),
         });
+        finalHash = h;
         setTxHashes(t => ({...t, [curIdx]: h}));
         await publicClient.waitForTransactionReceipt({hash: h});
         setStatuses(s => ({...s, [curIdx]: "confirmed"}));
@@ -427,7 +439,7 @@ export function DeployScreen({
       }
 
       setPhase("done");
-      if (registryAddr && registrarAddr) onDone(registryAddr, registrarAddr);
+      if (registryAddr && registrarAddr) onDone(registryAddr, registrarAddr, finalHash);
     } catch (e) {
       console.error("[sapling] deploy failed:", e);
       setError(e instanceof Error ? e.message : String(e));
