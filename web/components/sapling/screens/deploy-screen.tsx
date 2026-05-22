@@ -612,27 +612,6 @@ export function DeployScreen({
             />
           </div>
 
-          <div className="text-[11px] font-mono uppercase tracking-wider text-fg-3 mt-6 mb-3">
-            Resolves
-          </div>
-          <div className="sapling-card px-4 py-1">
-            <SummaryRow
-              k="Pattern"
-              v={
-                <span className="font-mono text-[12.5px] text-fg">
-                  *.{parent}
-                </span>
-              }
-            />
-            <SummaryRow
-              k="Parent registry"
-              v={
-                <span className="font-mono text-[12.5px] text-fg">
-                  {shortAddr(parentInfo.registry)}
-                </span>
-              }
-            />
-          </div>
         </div>
 
         <div>
@@ -666,16 +645,6 @@ export function DeployScreen({
             {skipped.map((c, i) => (
               <TxRow key={`s${i}`} idx={0} call={c} skipped network={network} />
             ))}
-            <div className="flex justify-between py-3 px-4 text-[13px] border-t border-border bg-bg-sunk">
-              <span className="text-fg-3">Estimated gas</span>
-              <span className="font-mono text-fg">
-                {gasEst.toLocaleString()} · {gasPrice} gwei
-              </span>
-            </div>
-            <div className="flex justify-between py-3 px-4 text-[13px] bg-bg-sunk">
-              <span className="text-fg-3">Total cost</span>
-              <span className="font-mono text-fg">{ethCost.toFixed(5)} ETH</span>
-            </div>
           </div>
 
           {skipped.length > 0 && phase === "review" && (
