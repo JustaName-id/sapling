@@ -3,7 +3,7 @@
 import {useEffect, useState} from "react";
 import {type Address} from "viem";
 import {useConnectModal} from "@rainbow-me/rainbowkit";
-import {fetchOwnedEthNames} from "@/lib/ens";
+import {fetchOwnedEthNames, formatExpiry, type OwnedName} from "@/lib/ens";
 import {EnsAvatar} from "@/components/sapling/ens-avatar";
 
 type Status = "idle" | "loading" | "loaded" | "error";
@@ -24,7 +24,7 @@ export function PickParentScreen({
   onBack: () => void;
 }) {
   const {openConnectModal} = useConnectModal();
-  const [names, setNames] = useState<string[]>([]);
+  const [names, setNames] = useState<OwnedName[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [manualName, setManualName] = useState("");
 
@@ -43,8 +43,10 @@ export function PickParentScreen({
       .catch(() => setStatus("error"));
   }, [address]);
 
-  const display =
-    manualName.trim().length > 0 ? [normalize(manualName)] : names;
+  const display: OwnedName[] =
+    manualName.trim().length > 0
+      ? [{name: normalize(manualName), expiryDate: null}]
+      : names;
 
   return (
     <div className="max-w-[720px] mx-auto w-full">
@@ -140,13 +142,14 @@ export function PickParentScreen({
           )}
 
           <div role="radiogroup" aria-label="Your .eth names">
-            {display.map(n => (
+            {display.map(d => (
               <NameRow
-                key={n}
-                name={n}
-                selected={selected === n}
-                dimmed={!!selected && selected !== n}
-                onClick={() => setSelected(n)}
+                key={d.name}
+                name={d.name}
+                expiryDate={d.expiryDate}
+                selected={selected === d.name}
+                dimmed={!!selected && selected !== d.name}
+                onClick={() => setSelected(d.name)}
               />
             ))}
           </div>
@@ -192,15 +195,18 @@ export function PickParentScreen({
 
 function NameRow({
   name,
+  expiryDate,
   selected,
   dimmed,
   onClick,
 }: {
   name: string;
+  expiryDate: number | string | null;
   selected: boolean;
   dimmed: boolean;
   onClick: () => void;
 }) {
+  const expiryLabel = formatExpiry(name, expiryDate);
   return (
     <div
       role="radio"
@@ -216,7 +222,7 @@ function NameRow({
       <EnsAvatar name={name} />
       <div className="flex-1 min-w-0 flex flex-col gap-0.5">
         <span className="font-mono text-[14px] text-fg">{name}</span>
-        <span className="text-[12px] text-fg-3">.eth name</span>
+        <span className="text-[12px] text-fg-3">{expiryLabel}</span>
       </div>
       <svg
         viewBox="0 0 18 18"
