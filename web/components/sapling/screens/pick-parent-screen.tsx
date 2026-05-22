@@ -2,8 +2,14 @@
 
 import {useEffect, useState} from "react";
 import {type Address} from "viem";
+import {usePublicClient} from "wagmi";
 import {useConnectModal} from "@rainbow-me/rainbowkit";
-import {fetchOwnedEthNames, formatExpiry, type OwnedName} from "@/lib/ens";
+import {
+  fetchOwnedEthNames,
+  formatExpiry,
+  resolveAvatars,
+  type OwnedName,
+} from "@/lib/ens";
 import {EnsAvatar} from "@/components/sapling/ens-avatar";
 
 type Status = "idle" | "loading" | "loaded" | "error";
@@ -24,6 +30,7 @@ export function PickParentScreen({
   onBack: () => void;
 }) {
   const {openConnectModal} = useConnectModal();
+  const publicClient = usePublicClient();
   const [names, setNames] = useState<OwnedName[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [manualName, setManualName] = useState("");
@@ -42,10 +49,16 @@ export function PickParentScreen({
     // network call so only the second one reaches the server.
     const abort = new AbortController();
     fetchOwnedEthNames(address, abort.signal)
-      .then(ns => {
+      .then(async ns => {
         if (abort.signal.aborted) return;
+        // Show names immediately; avatars stream in on a follow-up pass so
+        // the picker isn't gated on resolver RPC calls.
         setNames(ns);
         setStatus("loaded");
+        if (!publicClient) return;
+        const withAvatars = await resolveAvatars(publicClient, ns, abort.signal);
+        if (abort.signal.aborted) return;
+        setNames(withAvatars);
       })
       .catch(err => {
         if (abort.signal.aborted) return;
@@ -53,11 +66,18 @@ export function PickParentScreen({
         setStatus("error");
       });
     return () => abort.abort();
-  }, [address]);
+  }, [address, publicClient]);
 
   const display: OwnedName[] =
     manualName.trim().length > 0
-      ? [{name: normalize(manualName), expiryDate: null}]
+      ? [
+          {
+            name: normalize(manualName),
+            expiryDate: null,
+            resolverAddress: null,
+            texts: [],
+          },
+        ]
       : names;
 
   return (
@@ -159,6 +179,7 @@ export function PickParentScreen({
                 key={d.name}
                 name={d.name}
                 expiryDate={d.expiryDate}
+                avatarUrl={d.avatarUrl}
                 selected={selected === d.name}
                 dimmed={!!selected && selected !== d.name}
                 onClick={() => setSelected(d.name)}
@@ -208,12 +229,14 @@ export function PickParentScreen({
 function NameRow({
   name,
   expiryDate,
+  avatarUrl,
   selected,
   dimmed,
   onClick,
 }: {
   name: string;
   expiryDate: number | string | null;
+  avatarUrl?: string;
   selected: boolean;
   dimmed: boolean;
   onClick: () => void;
@@ -231,7 +254,7 @@ function NameRow({
           : "border-border hover:border-border-strong hover:shadow-sm"
       } ${dimmed ? "opacity-50" : ""}`}
     >
-      <EnsAvatar name={name} />
+      <EnsAvatar name={name} src={avatarUrl} />
       <div className="flex-1 min-w-0 flex flex-col gap-0.5">
         <span className="font-mono text-[14px] text-fg">{name}</span>
         <span className="text-[12px] text-fg-3">{expiryLabel}</span>
