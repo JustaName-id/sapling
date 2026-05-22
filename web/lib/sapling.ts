@@ -74,6 +74,20 @@ export function saltForParent(parentTokenId: bigint): Hex {
 }
 
 /**
+ * Cryptographically random 256-bit salt for fresh deploys. Used when the user
+ * wants a new registry under a parent that already has one — pick a random
+ * salt instead of bumping the canonical (tokenId) one so collisions are
+ * effectively impossible on first try.
+ */
+export function randomSalt(): bigint {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let n = 0n;
+  for (const b of bytes) n = (n << 8n) | BigInt(b);
+  return n;
+}
+
+/**
  * CREATE2 address of the OpenRegistrar that would be deployed via the standard
  * deployer for the given (registry, salt). Pure derivation, no RPC call.
  */

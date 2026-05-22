@@ -165,11 +165,36 @@ export function PickParentScreen({
               <h3 className="m-0 mb-1.5 text-fg text-[15px] font-medium">
                 No .eth names found
               </h3>
-              <p className="m-0 mb-4 text-[13.5px]">
-                No names owned by this address on{" "}
-                {network === "mainnet" ? "Mainnet" : "Sepolia"}. You can still
-                type a name manually below.
+              <p className="m-0 mb-5 text-[13.5px] max-w-[44ch] mx-auto">
+                This wallet doesn&apos;t own any{" "}
+                <span className="font-mono">.eth</span> names on{" "}
+                {network === "mainnet" ? "Mainnet" : "Sepolia"}. Register one
+                first, or type a name you already own below.
               </p>
+              <a
+                href="https://app.ens.dev"
+                target="_blank"
+                rel="noreferrer"
+                className="sapling-btn"
+                data-variant="primary"
+                data-size="sm"
+              >
+                Register on ENS
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3 9L9 3M9 3H4M9 3V8"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </a>
             </div>
           )}
 
