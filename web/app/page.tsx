@@ -1,14 +1,13 @@
 "use client";
 
 import {useEffect, useMemo, useState} from "react";
-import {useAccount, useDisconnect, usePublicClient} from "wagmi";
-import {useConnectModal} from "@rainbow-me/rainbowkit";
+import {useAccount, usePublicClient} from "wagmi";
 import {type Address, type PublicClient} from "viem";
 
 import {BrandMark} from "@/components/sapling/brand-mark";
+import {ConnectButton} from "@/components/connect-button";
 import {Footer} from "@/components/sapling/footer";
 import {StepIndicator} from "@/components/sapling/step-indicator";
-import {shortAddr} from "@/components/sapling/address";
 import {ToastHost} from "@/components/sapling/toast";
 
 import {
@@ -43,8 +42,6 @@ const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as Address;
 
 export default function Home() {
   const {address, isConnected} = useAccount();
-  const {disconnect} = useDisconnect();
-  const {openConnectModal} = useConnectModal();
   const publicClient = usePublicClient();
 
   const [step, setStep] = useState<Step>(0);
@@ -194,53 +191,14 @@ export default function Home() {
 
         <div className="flex-1" />
 
-        {isConnected && address ? (
-          <button
-            type="button"
-            onClick={() => disconnect()}
-            className="inline-flex items-center gap-2 h-8 px-2.5 rounded-full border border-border font-mono text-[12px] text-fg-2 bg-bg cursor-pointer hover:border-border-strong hover:text-fg transition-colors"
-            title="Disconnect"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-            {shortAddr(address)}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => openConnectModal?.()}
-            className="sapling-btn"
-            data-variant="primary"
-            data-size="sm"
-          >
-            Connect wallet
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 14 14"
-              fill="none"
-              aria-hidden="true"
-            >
-              <path
-                d="M2.5 7h9M8 3.5L11.5 7 8 10.5"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        )}
+        <ConnectButton />
       </header>
 
       {showStepIndicator && <StepIndicator current={indicatorIndex} />}
 
       <main className="flex-1 px-6 py-6 pb-20">
         {step === 0 ? (
-          <ConnectScreen
-            network={network}
-            setNetwork={setNetwork}
-            onStart={handleStart}
-          />
+          <ConnectScreen onStart={handleStart} />
         ) : deployed && parentInfo && selectedName ? (
           <SuccessScreen
             parent={selectedName}

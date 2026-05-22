@@ -21,9 +21,14 @@ type GraphResponse = {
  * Fetch all ENSv2-staging names owned by `address`, at any depth.
  * Subname rows come back with `expiryDate: null` because only top-level
  * `.eth` names have a direct expiry in the indexer.
+ *
+ * Accepts an optional AbortSignal so callers can cancel in-flight requests
+ * (e.g. on React 19 Strict Mode double-effects, on re-renders, or when the
+ * component unmounts).
  */
 export async function fetchOwnedEthNames(
   address: Address,
+  signal?: AbortSignal,
 ): Promise<OwnedName[]> {
   const res = await fetch(ENS_STAGING_GRAPHQL, {
     method: "POST",
@@ -31,6 +36,7 @@ export async function fetchOwnedEthNames(
     body: JSON.stringify({
       query: `{ account(id: "${address.toLowerCase()}") { id domains { name expiryDate } } }`,
     }),
+    signal,
   });
   if (!res.ok) throw new Error(`ENS graph ${res.status}`);
   const json: GraphResponse = await res.json();

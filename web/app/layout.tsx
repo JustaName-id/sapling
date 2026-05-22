@@ -17,7 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "Sapling",
-  description: "Issue onchain ENS subnames on L1.",
+  description: "Issue onchain ENSv2 subnames on L1.",
 };
 
 export default function RootLayout({

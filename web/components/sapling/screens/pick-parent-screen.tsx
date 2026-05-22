@@ -35,12 +35,24 @@ export function PickParentScreen({
       return;
     }
     setStatus("loading");
-    fetchOwnedEthNames(address)
+    // React 19 Strict Mode runs effects twice on mount in dev. Without an
+    // abort, two parallel requests hit ENS staging GraphQL — one of them
+    // races back as a failure (or an empty `{account: null}` overwriting
+    // good data with []). AbortController cancels the first request's
+    // network call so only the second one reaches the server.
+    const abort = new AbortController();
+    fetchOwnedEthNames(address, abort.signal)
       .then(ns => {
+        if (abort.signal.aborted) return;
         setNames(ns);
         setStatus("loaded");
       })
-      .catch(() => setStatus("error"));
+      .catch(err => {
+        if (abort.signal.aborted) return;
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setStatus("error");
+      });
+    return () => abort.abort();
   }, [address]);
 
   const display: OwnedName[] =

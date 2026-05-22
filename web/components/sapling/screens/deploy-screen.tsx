@@ -1,23 +1,22 @@
 "use client";
 
-import {useEffect, useRef, useState} from "react";
-import {
-  encodeDeployData,
-  encodeFunctionData,
-  parseEventLogs,
-  type Address,
-} from "viem";
+import {useEffect, useMemo, useRef, useState} from "react";
+import {encodeFunctionData, type Address, type Hex} from "viem";
 import {usePublicClient, useWalletClient} from "wagmi";
 
 import {Address as AddrPill, shortAddr} from "@/components/sapling/address";
 import {
   ROLE_REGISTRAR,
   SEPOLIA_ADDRESSES,
+  STANDARD_CREATE2_DEPLOYER,
   ethRegistryAbi,
+  findExistingUserRegistry,
+  openRegistrarCreate2Calldata,
+  predictOpenRegistrarAddress,
+  saltForParent,
   saplingFactoryAbi,
   userRegistryAbi,
 } from "@/lib/sapling";
-import {openRegistrarAbi, openRegistrarBytecode} from "@/lib/openRegistrar";
 
 import type {RegistryConfig} from "./registry-screen";
 import type {RegistrarConfig} from "./registrar-screen";
@@ -63,68 +62,330 @@ export function DeployScreen({
   const [statuses, setStatuses] = useState<Record<number, Status>>({});
   const [txHashes, setTxHashes] = useState<Record<number, Address>>({});
   const [error, setError] = useState<string>();
+  // Simulation result for the SaplingFactory.deployRegistry call. Only used
+  // when registry.source === "deploy"; the paste path bypasses it via useMemo.
+  const [simRegistry, setSimRegistry] = useState<Address>();
+  const [predictError, setPredictError] = useState<string>();
+  // EIP-5792 capability: undefined while detecting, true if the wallet can
+  // atomically batch the deploy in one signature, false if we must fall back
+  // to sequential `sendTransaction` calls.
+  const [batchCapable, setBatchCapable] = useState<boolean>();
+  // Whether the predicted addresses already have code on-chain. If they do,
+  // we must skip those deploy calls in the batch — otherwise the matching
+  // CREATE / CREATE2 would revert and (with forceAtomic) sink the whole bundle.
+  const [registryDeployed, setRegistryDeployed] = useState<boolean>(false);
+  const [registrarDeployed, setRegistrarDeployed] = useState<boolean>(false);
 
   const {live, skipped} = buildBatch(parent, registry, registrar);
   const gasPrice = network === "mainnet" ? 12 : 1.2;
   const gasEst = 240_000 + live.length * 62_000;
   const ethCost = (gasEst * gasPrice) / 1e9;
 
+  // "Deploy fresh" mode: bumps the salt so a new registry/registrar pair is
+  // produced even when a prior deploy already exists at the canonical salt.
+  // Default mode (false) reuses any existing deploy idempotently.
+  const [freshDeploy, setFreshDeploy] = useState(false);
+  const [saltNonce, setSaltNonce] = useState<bigint>(0n);
+  const effectiveTokenIdSalt = parentInfo.tokenId + saltNonce;
+  const salt = saltForParent(effectiveTokenIdSalt);
+
+  // Final UserRegistry address: paste path is trivially the user-supplied
+  // address; deploy path uses the eth_call simulation result.
+  const predictedRegistry: Address | undefined =
+    registry.source === "paste"
+      ? (registry.pasteAddress as Address)
+      : simRegistry;
+
+  // OpenRegistrar address derives synchronously from (registry, salt). Pure.
+  const predictedRegistrar: Address | undefined = useMemo(() => {
+    if (registrar.source === "paste") return registrar.pasteAddress as Address;
+    if (!predictedRegistry) return undefined;
+    return predictOpenRegistrarAddress(predictedRegistry, salt);
+  }, [registrar, predictedRegistry, salt]);
+
+  // When freshDeploy flips off, reset to the canonical salt. When it flips on,
+  // walk forward until we find an unused offset. Capped at 100 to avoid
+  // pathological loops; in practice nonce=1 is almost always free.
+  useEffect(() => {
+    if (!freshDeploy) return;
+    if (!publicClient) return;
+    let cancelled = false;
+    (async () => {
+      let n = 1n;
+      while (n < 100n) {
+        const existing = await findExistingUserRegistry(
+          publicClient,
+          registry.admin,
+          parentInfo.tokenId + n,
+        );
+        if (cancelled) return;
+        if (!existing) break;
+        n++;
+      }
+      if (cancelled) return;
+      setSaltNonce(n);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [freshDeploy, registry.admin, parentInfo.tokenId, publicClient]);
+
+  // Resolve the predicted UserRegistry address. Two paths:
+  //   1) Existing deploy: scan SaplingFactory's RegistryDeployed events for a
+  //      prior (admin, salt) match. If found, use that address — simulating
+  //      would only revert (VerifiableFactory's `new UUPSProxy{salt}` reverts
+  //      on CREATE2 collision).
+  //   2) Fresh deploy: simulate to get the address it would land at.
+  useEffect(() => {
+    if (registry.source !== "deploy") return;
+    if (!publicClient) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const existing = await findExistingUserRegistry(
+          publicClient,
+          registry.admin,
+          effectiveTokenIdSalt,
+        );
+        if (cancelled) return;
+        if (existing) {
+          setSimRegistry(existing);
+          setRegistryDeployed(true);
+          setPredictError(undefined);
+          return;
+        }
+        const {result} = await publicClient.simulateContract({
+          address: SEPOLIA_ADDRESSES.saplingFactory,
+          abi: saplingFactoryAbi,
+          functionName: "deployRegistry",
+          args: [registry.admin, effectiveTokenIdSalt],
+          account: registry.admin,
+        });
+        if (cancelled) return;
+        setSimRegistry(result as Address);
+        setRegistryDeployed(false);
+        setPredictError(undefined);
+      } catch (e) {
+        if (cancelled) return;
+        setPredictError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [registry, effectiveTokenIdSalt, publicClient]);
+
+  // Has the predicted OpenRegistrar already been deployed? The standard CREATE2
+  // deployer silently no-ops on collision (returns address(0)) so this wouldn't
+  // hard-fail like the UserRegistry path, but we still want to skip the call
+  // in the batch to save gas and surface "reusing" state to the user.
+  useEffect(() => {
+    if (!predictedRegistrar || !publicClient) return;
+    let cancelled = false;
+    publicClient
+      .getCode({address: predictedRegistrar})
+      .then(code => {
+        if (cancelled) return;
+        setRegistrarDeployed(!!code && code !== "0x");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRegistrarDeployed(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [predictedRegistrar, publicClient]);
+
+  // Probe EIP-5792 support. We need atomic execution on the active chain so
+  // partial deploys can't happen. The state stays stale across disconnects;
+  // the button is gated on walletClient anyway so it can't be misused.
+  useEffect(() => {
+    if (!walletClient || !publicClient?.chain) return;
+    const chainId = publicClient.chain.id;
+    let cancelled = false;
+    (async () => {
+      try {
+        const caps = await walletClient.getCapabilities({chainId});
+        if (cancelled) return;
+        const status = caps?.atomic?.status;
+        setBatchCapable(status === "supported" || status === "ready");
+      } catch {
+        if (cancelled) return;
+        setBatchCapable(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [walletClient, publicClient]);
+
+  // Build the call list for both batched and sequential paths so they stay
+  // in lockstep. Each entry is one tx in the sequential flow / one call in
+  // the EIP-5792 bundle. Order matters: deploys first, then role grant on
+  // the new registry, then the parent's subregistry pointer flip.
+  const buildCalls = (
+    regAddr: Address,
+    registrarAddr: Address,
+  ): {to: Address; data: Hex}[] => {
+    const calls: {to: Address; data: Hex}[] = [];
+    // Skip the registry deploy if a UserRegistry already lives at the predicted
+    // address — VerifiableFactory's `new UUPSProxy{salt}` reverts on collision,
+    // which (with forceAtomic) would sink the whole bundle.
+    if (registry.source === "deploy" && !registryDeployed) {
+      calls.push({
+        to: SEPOLIA_ADDRESSES.saplingFactory,
+        data: encodeFunctionData({
+          abi: saplingFactoryAbi,
+          functionName: "deployRegistry",
+          args: [registry.admin, effectiveTokenIdSalt],
+        }),
+      });
+    }
+    // Arachnid's deployer silently no-ops on collision rather than reverting,
+    // but skip the call anyway to save gas and keep the batch honest about
+    // what it's actually doing.
+    if (registrar.source === "deploy" && !registrarDeployed) {
+      calls.push({
+        to: STANDARD_CREATE2_DEPLOYER,
+        data: openRegistrarCreate2Calldata(regAddr, salt),
+      });
+    }
+    calls.push({
+      to: regAddr,
+      data: encodeFunctionData({
+        abi: userRegistryAbi,
+        functionName: "grantRootRoles",
+        args: [ROLE_REGISTRAR, registrarAddr],
+      }),
+    });
+    calls.push({
+      to: parentInfo.registry,
+      data: encodeFunctionData({
+        abi: ethRegistryAbi,
+        functionName: "setSubregistry",
+        args: [parentInfo.tokenId, regAddr],
+      }),
+    });
+    return calls;
+  };
+
   const startedRef = useRef(false);
-  const startDeploy = async () => {
+
+  const startBatchedDeploy = async () => {
     if (startedRef.current) return;
     if (!walletClient || !publicClient) return;
+    if (!predictedRegistry || !predictedRegistrar) {
+      setError("Predicted addresses not ready");
+      return;
+    }
     startedRef.current = true;
 
     setPhase("signing");
-    let registryAddr: Address | undefined =
-      registry.source === "paste" ? (registry.pasteAddress as Address) : undefined;
-    let registrarAddr: Address | undefined =
-      registrar.source === "paste" ? (registrar.pasteAddress as Address) : undefined;
+    try {
+      const calls = buildCalls(predictedRegistry, predictedRegistrar);
+      setStatuses(Object.fromEntries(calls.map((_, i) => [i, "submitted"])));
+      const {id} = await walletClient.sendCalls({calls, forceAtomic: true});
+      setPhase("confirming");
+      const result = await walletClient.waitForCallsStatus({id});
+      if (result.status !== "success") {
+        throw new Error(`Bundle status: ${result.status}`);
+      }
+      // Atomic bundles usually return a single receipt covering all calls;
+      // non-atomic returns one per call. Map whichever shape we got so each
+      // row links to a real tx hash on Etherscan.
+      const receipts = result.receipts ?? [];
+      const fallbackHash = receipts[0]?.transactionHash as Address | undefined;
+      const newHashes: Record<number, Address> = {};
+      calls.forEach((_, i) => {
+        const h = (receipts[i]?.transactionHash ?? fallbackHash) as
+          | Address
+          | undefined;
+        if (h) newHashes[i] = h;
+      });
+      setTxHashes(t => ({...t, ...newHashes}));
+      const regCode = await publicClient.getCode({address: predictedRegistry});
+      const registrarCode = await publicClient.getCode({address: predictedRegistrar});
+      if (!regCode || regCode === "0x") {
+        throw new Error(`UserRegistry not at predicted ${predictedRegistry}`);
+      }
+      if (!registrarCode || registrarCode === "0x") {
+        throw new Error(`OpenRegistrar not at predicted ${predictedRegistrar}`);
+      }
+      setStatuses(Object.fromEntries(calls.map((_, i) => [i, "confirmed"])));
+      setPhase("done");
+      onDone(predictedRegistry, predictedRegistrar);
+    } catch (e) {
+      console.error("[sapling] batched deploy failed:", e);
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase("review");
+      startedRef.current = false;
+    }
+  };
+
+  const startDeploy = async () => {
+    if (startedRef.current) return;
+    if (!walletClient || !publicClient) return;
+    if (!predictedRegistry || !predictedRegistrar) {
+      setError("Predicted addresses not ready");
+      return;
+    }
+    startedRef.current = true;
+
+    setPhase("signing");
+    const registryAddr = predictedRegistry;
+    const registrarAddr = predictedRegistrar;
 
     try {
       let idx = 0;
 
       if (registry.source === "deploy") {
         const curIdx = idx;
-        setStatuses(s => ({...s, [curIdx]: "submitted"}));
-        const h = await walletClient.sendTransaction({
-          to: SEPOLIA_ADDRESSES.saplingFactory,
-          data: encodeFunctionData({
-            abi: saplingFactoryAbi,
-            functionName: "deployRegistry",
-            args: [registry.admin],
-          }),
-        });
-        setTxHashes(t => ({...t, [curIdx]: h}));
-        setPhase("confirming");
-        const r = await publicClient.waitForTransactionReceipt({hash: h});
-        const events = parseEventLogs({
-          abi: saplingFactoryAbi,
-          eventName: "RegistryDeployed",
-          logs: r.logs,
-        });
-        registryAddr = events[0]?.args.registry as Address | undefined;
-        if (!registryAddr) throw new Error("RegistryDeployed event missing");
-        setStatuses(s => ({...s, [curIdx]: "confirmed"}));
+        // Skip if a registry already lives at the predicted address (idempotent re-run).
+        const existing = await publicClient.getCode({address: registryAddr});
+        if (existing && existing !== "0x") {
+          setStatuses(s => ({...s, [curIdx]: "confirmed"}));
+        } else {
+          setStatuses(s => ({...s, [curIdx]: "submitted"}));
+          const h = await walletClient.sendTransaction({
+            to: SEPOLIA_ADDRESSES.saplingFactory,
+            data: encodeFunctionData({
+              abi: saplingFactoryAbi,
+              functionName: "deployRegistry",
+              args: [registry.admin, effectiveTokenIdSalt],
+            }),
+          });
+          setTxHashes(t => ({...t, [curIdx]: h}));
+          setPhase("confirming");
+          await publicClient.waitForTransactionReceipt({hash: h});
+          const code = await publicClient.getCode({address: registryAddr});
+          if (!code || code === "0x") {
+            throw new Error(`UserRegistry not at predicted ${registryAddr}`);
+          }
+          setStatuses(s => ({...s, [curIdx]: "confirmed"}));
+        }
         idx++;
       }
 
       if (registrar.source === "deploy") {
         const curIdx = idx;
-        if (!registryAddr) throw new Error("registry address unresolved");
-        setStatuses(s => ({...s, [curIdx]: "submitted"}));
-        const h = await walletClient.sendTransaction({
-          data: encodeDeployData({
-            abi: openRegistrarAbi,
-            bytecode: openRegistrarBytecode,
-            args: [registryAddr],
-          }),
-        });
-        setTxHashes(t => ({...t, [curIdx]: h}));
-        const r = await publicClient.waitForTransactionReceipt({hash: h});
-        registrarAddr = (r.contractAddress as Address | null) ?? undefined;
-        if (!registrarAddr) throw new Error("OpenRegistrar address missing");
-        setStatuses(s => ({...s, [curIdx]: "confirmed"}));
+        const existing = await publicClient.getCode({address: registrarAddr});
+        if (existing && existing !== "0x") {
+          setStatuses(s => ({...s, [curIdx]: "confirmed"}));
+        } else {
+          setStatuses(s => ({...s, [curIdx]: "submitted"}));
+          const h = await walletClient.sendTransaction({
+            to: STANDARD_CREATE2_DEPLOYER,
+            data: openRegistrarCreate2Calldata(registryAddr, salt),
+          });
+          setTxHashes(t => ({...t, [curIdx]: h}));
+          await publicClient.waitForTransactionReceipt({hash: h});
+          const code = await publicClient.getCode({address: registrarAddr});
+          if (!code || code === "0x") {
+            throw new Error(`OpenRegistrar not at predicted ${registrarAddr}`);
+          }
+          setStatuses(s => ({...s, [curIdx]: "confirmed"}));
+        }
         idx++;
       }
 
@@ -221,7 +482,14 @@ export function DeployScreen({
               k="UserRegistry"
               v={
                 registry.source === "deploy" ? (
-                  <span className="text-fg">Deploy new</span>
+                  predictedRegistry ? (
+                    <span className="inline-flex items-center gap-2">
+                      {registryDeployed ? "Reusing existing" : "Deploy new"} ·{" "}
+                      <AddrPill value={predictedRegistry} />
+                    </span>
+                  ) : (
+                    <span className="text-fg-3">Deploy new · computing…</span>
+                  )
                 ) : (
                   <span className="inline-flex items-center gap-2">
                     Reuse · <AddrPill value={registry.pasteAddress} />
@@ -229,6 +497,42 @@ export function DeployScreen({
                 )
               }
             />
+            {registry.source === "deploy" &&
+              registryDeployed &&
+              !freshDeploy && (
+                <SummaryRow
+                  k=""
+                  v={
+                    <button
+                      type="button"
+                      className="text-[12px] text-fg-3 underline hover:text-fg"
+                      onClick={() => setFreshDeploy(true)}
+                    >
+                      Deploy a fresh registry instead
+                    </button>
+                  }
+                />
+              )}
+            {registry.source === "deploy" && freshDeploy && (
+              <SummaryRow
+                k=""
+                v={
+                  <span className="inline-flex items-center gap-2 text-[12px] text-fg-3">
+                    Fresh-deploy mode (salt +{saltNonce.toString()})
+                    <button
+                      type="button"
+                      className="underline hover:text-fg"
+                      onClick={() => {
+                        setFreshDeploy(false);
+                        setSaltNonce(0n);
+                      }}
+                    >
+                      reuse instead
+                    </button>
+                  </span>
+                }
+              />
+            )}
             {registry.source === "deploy" && (
               <>
                 <SummaryRow
@@ -245,7 +549,16 @@ export function DeployScreen({
               k="Registrar"
               v={
                 registrar.source === "deploy" ? (
-                  <span className="text-fg">Deploy new · Open mode</span>
+                  predictedRegistrar ? (
+                    <span className="inline-flex items-center gap-2">
+                      {registrarDeployed ? "Reusing existing" : "Deploy new"} ·
+                      Open mode · <AddrPill value={predictedRegistrar} />
+                    </span>
+                  ) : (
+                    <span className="text-fg-3">
+                      Deploy new · Open mode · computing…
+                    </span>
+                  )
                 ) : (
                   <span className="inline-flex items-center gap-2">
                     Reuse · <AddrPill value={registrar.pasteAddress} />
@@ -284,7 +597,7 @@ export function DeployScreen({
 
         <div>
           <div className="text-[11px] font-mono uppercase tracking-wider text-fg-3 mb-3">
-            Batch · sign each in order
+            {batchCapable ? "Batch · one signature" : "Batch · sign each in order"}
           </div>
           <div className="sapling-card">
             <div className="py-3 px-4 border-b border-border text-[11px] font-mono uppercase tracking-wider text-fg-3 flex justify-between">
@@ -292,7 +605,13 @@ export function DeployScreen({
                 {live.length} call{live.length === 1 ? "" : "s"}
                 {skipped.length > 0 && ` · ${skipped.length} skipped`}
               </span>
-              <span>1 signature each</span>
+              <span>
+                {batchCapable === undefined
+                  ? "checking wallet…"
+                  : batchCapable
+                    ? "1 signature · atomic"
+                    : `${live.length} signature${live.length === 1 ? "" : "s"}`}
+              </span>
             </div>
             {live.map((c, i) => (
               <TxRow
@@ -329,6 +648,17 @@ export function DeployScreen({
         </div>
       </div>
 
+      {predictError && phase === "review" && (
+        <div className="mt-6 sapling-card p-4 border-l-4" style={{borderLeftColor: "var(--danger)"}}>
+          <p className="text-fg font-medium m-0 mb-1">
+            Could not compute predicted registry address
+          </p>
+          <p className="text-[12.5px] text-fg-3 font-mono m-0 break-all">
+            {predictError}
+          </p>
+        </div>
+      )}
+
       {error && (
         <div className="mt-6 sapling-card p-4 border-l-4" style={{borderLeftColor: "var(--danger)"}}>
           <p className="text-fg font-medium m-0 mb-1">Transaction failed</p>
@@ -352,10 +682,18 @@ export function DeployScreen({
             type="button"
             className="sapling-btn"
             data-variant="primary"
-            onClick={startDeploy}
-            disabled={!walletClient || !publicClient}
+            onClick={batchCapable ? startBatchedDeploy : startDeploy}
+            disabled={
+              !walletClient ||
+              !publicClient ||
+              !predictedRegistry ||
+              !predictedRegistrar ||
+              batchCapable === undefined
+            }
           >
-            Sign and deploy
+            {batchCapable
+              ? "Sign once and deploy"
+              : `Sign ${live.length} tx${live.length === 1 ? "" : "s"} and deploy`}
           </button>
         </div>
       )}
@@ -459,27 +797,27 @@ function buildBatch(
     live.push({
       contract: "SaplingFactory",
       fn: "deployRegistry",
-      args: [shortAddr(registry.admin)],
+      args: [shortAddr(registry.admin), "salt"],
     });
   } else {
     skipped.push({
       contract: "SaplingFactory",
       fn: "deployRegistry",
-      args: ["admin"],
+      args: ["admin", "salt"],
     });
   }
 
   if (registrar.source === "deploy") {
     live.push({
-      contract: "OpenRegistrar",
-      fn: "constructor",
-      args: ["userRegistry"],
+      contract: "Create2Deployer",
+      fn: "deploy",
+      args: ["salt", "OpenRegistrar(userRegistry)"],
     });
   } else {
     skipped.push({
-      contract: "OpenRegistrar",
-      fn: "constructor",
-      args: ["userRegistry"],
+      contract: "Create2Deployer",
+      fn: "deploy",
+      args: ["salt", "OpenRegistrar(userRegistry)"],
     });
   }
 
