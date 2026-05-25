@@ -62,7 +62,6 @@ export default function Home() {
   const [registrar, setRegistrar] = useState<RegistrarConfig>({
     source: "deploy",
     mode: "open",
-    emancipate: false,
     pasteAddress: "",
   });
 
@@ -169,7 +168,6 @@ export default function Home() {
     setRegistrar({
       source: "deploy",
       mode: "open",
-      emancipate: false,
       pasteAddress: "",
     });
   };

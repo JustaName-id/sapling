@@ -78,38 +78,49 @@ export function SuccessScreen({
 
       <div className="mt-6 py-3.5 px-4 bg-bg-sunk border border-border rounded-[12px] text-[13.5px] text-fg-2">
         You can now register subnames under{" "}
-        <span className="font-mono text-fg">{parent}</span>. Try{" "}
-        <span className="font-mono text-fg">{exampleSub}</span>.
+        <span className="font-mono text-fg">{parent}</span>. Try minting{" "}
+        <span className="font-mono text-fg">{exampleSub}</span> below.
       </div>
 
-      <div className="mt-10 flex justify-end items-center gap-3">
-        {txHash && (
-          <a
-            href={`${explorer}/tx/${txHash}`}
-            target="_blank"
-            rel="noreferrer"
+      <div className="mt-10 flex justify-between items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            type="button"
             className="sapling-btn"
-            data-variant="secondary"
+            data-variant="ghost"
+            onClick={onReset}
           >
-            View tx on Etherscan
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path
-                d="M3 9L9 3M9 3H4M9 3V8"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            </svg>
-          </a>
-        )}
-        <button
-          type="button"
+            Deploy another
+          </button>
+          {txHash && (
+            <a
+              href={`${explorer}/tx/${txHash}`}
+              target="_blank"
+              rel="noreferrer"
+              className="sapling-btn"
+              data-variant="ghost"
+            >
+              View tx
+            </a>
+          )}
+        </div>
+        <a
+          href={`${explorer}/address/${registrar}#writeContract`}
+          target="_blank"
+          rel="noreferrer"
           className="sapling-btn"
           data-variant="primary"
-          onClick={onReset}
         >
-          Deploy another
-        </button>
+          Mint a subname
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path
+              d="M3 9L9 3M9 3H4M9 3V8"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+          </svg>
+        </a>
       </div>
     </div>
   );

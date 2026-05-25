@@ -548,10 +548,6 @@ export function DeployScreen({
                 )
               }
             />
-            <SummaryRow
-              k="Emancipated"
-              v={registrar.emancipate ? "Yes, at deploy" : "No"}
-            />
           </div>
 
         </div>
@@ -793,14 +789,6 @@ function buildBatch(
         : "userRegistry",
     ],
   });
-
-  if (registrar.emancipate) {
-    live.push({
-      contract: "EthRegistry",
-      fn: "emancipate",
-      args: ["parentTokenId"],
-    });
-  }
 
   return {live, skipped};
 }
