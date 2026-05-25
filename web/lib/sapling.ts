@@ -1,6 +1,6 @@
 import {
   concat,
-  decodeFunctionData,
+  encodeAbiParameters,
   encodeDeployData,
   getCreate2Address,
   keccak256,
@@ -9,10 +9,10 @@ import {
   type Abi,
   type Address,
   type Hex,
-  type PublicClient,
 } from "viem";
 
 import {openRegistrarAbi, openRegistrarBytecode} from "./openRegistrar";
+import {uupsProxyAbi, uupsProxyBytecode} from "./uupsProxy";
 
 /**
  * Canonical Sapling and ENSv2 staging addresses on Sepolia.
@@ -23,13 +23,6 @@ export const SEPOLIA_ADDRESSES = {
   verifiableFactory: "0x9240c5F31D747d60b3d9Aed2F57995094342B1Ed" as Address,
   userRegistryImpl: "0xEa93AFf7375E8176053ab6ab36B57cab53CbF702" as Address,
 } as const;
-
-/**
- * Block at which the canonical Sepolia SaplingFactory was deployed. Used as a
- * lower bound when scanning RegistryDeployed events so we don't ask the RPC
- * to look further back than necessary (and avoid block-range limits).
- */
-export const SAPLING_FACTORY_DEPLOY_BLOCK_SEPOLIA = 10_896_004n;
 
 /**
  * Arachnid's deterministic deployment proxy, pre-deployed on every EVM chain.
@@ -172,44 +165,42 @@ export const userRegistryAbi = [
 ] as const satisfies Abi;
 
 /**
- * Look up an already-deployed UserRegistry for (admin, salt) by scanning the
- * SaplingFactory's RegistryDeployed events.
+ * CREATE2 address of the UserRegistry proxy that SaplingFactory.deployRegistry
+ * would land at for the given (admin, salt). Pure derivation, no RPC call.
  *
- * Used as the primary path when predicting the registry address: if a prior
- * deploy exists, simulating deployRegistry would revert (CREATE2 collision in
- * VerifiableFactory), so we ask the chain for what's there instead.
+ * Mirrors the on-chain composition exactly:
+ *   namespacedSalt = keccak256(abi.encode(admin, salt))
+ *   outerSalt      = keccak256(abi.encode(SaplingFactory, namespacedSalt))
+ *   initcode       = UUPSProxy.creationCode || abi.encode(VerifiableFactory, outerSalt)
+ *   proxy          = CREATE2(deployer = VerifiableFactory, salt = outerSalt, initcode)
  *
- * Returns null if no matching event found.
+ * Pair with `getCode(predicted)` to test for prior deployment without any
+ * event-log scan or block-range dance.
  */
-export async function findExistingUserRegistry(
-  publicClient: PublicClient,
+export function predictUserRegistryAddress(
   admin: Address,
   salt: bigint,
-): Promise<Address | null> {
-  const events = await publicClient.getContractEvents({
-    address: SEPOLIA_ADDRESSES.saplingFactory,
-    abi: saplingFactoryAbi,
-    eventName: "RegistryDeployed",
-    args: {admin},
-    fromBlock: SAPLING_FACTORY_DEPLOY_BLOCK_SEPOLIA,
+): Address {
+  const namespacedSalt = keccak256(
+    encodeAbiParameters(
+      [{type: "address"}, {type: "uint256"}],
+      [admin, salt],
+    ),
+  );
+  const outerSalt = keccak256(
+    encodeAbiParameters(
+      [{type: "address"}, {type: "uint256"}],
+      [SEPOLIA_ADDRESSES.saplingFactory, BigInt(namespacedSalt)],
+    ),
+  );
+  const initcode = encodeDeployData({
+    abi: uupsProxyAbi,
+    bytecode: uupsProxyBytecode,
+    args: [SEPOLIA_ADDRESSES.verifiableFactory, outerSalt],
   });
-  for (const e of events) {
-    if (!e.transactionHash) continue;
-    try {
-      const tx = await publicClient.getTransaction({hash: e.transactionHash});
-      const decoded = decodeFunctionData({
-        abi: saplingFactoryAbi,
-        data: tx.input,
-      });
-      if (
-        decoded.functionName === "deployRegistry" &&
-        decoded.args[1] === salt
-      ) {
-        return e.args.registry as Address;
-      }
-    } catch {
-      // Skip unparseable txs (e.g. smart-account wrappers we can't decode).
-    }
-  }
-  return null;
+  return getCreate2Address({
+    from: SEPOLIA_ADDRESSES.verifiableFactory,
+    salt: outerSalt,
+    bytecodeHash: keccak256(initcode),
+  });
 }

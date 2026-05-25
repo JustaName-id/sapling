@@ -10,9 +10,9 @@ import {
   SEPOLIA_ADDRESSES,
   STANDARD_CREATE2_DEPLOYER,
   ethRegistryAbi,
-  findExistingUserRegistry,
   openRegistrarCreate2Calldata,
   predictOpenRegistrarAddress,
+  predictUserRegistryAddress,
   randomSalt,
   saltForParent,
   saplingFactoryAbi,
@@ -67,9 +67,6 @@ export function DeployScreen({
   const [statuses, setStatuses] = useState<Record<number, Status>>({});
   const [txHashes, setTxHashes] = useState<Record<number, Address>>({});
   const [error, setError] = useState<string>();
-  // Simulation result for the SaplingFactory.deployRegistry call. Only used
-  // when registry.source === "deploy"; the paste path bypasses it via useMemo.
-  const [simRegistry, setSimRegistry] = useState<Address>();
   const [predictError, setPredictError] = useState<string>();
   // EIP-5792 capability: undefined while detecting, true if the wallet can
   // atomically batch the deploy in one signature, false if we must fall back
@@ -96,12 +93,13 @@ export function DeployScreen({
     freshDeploy && freshSalt !== undefined ? freshSalt : parentInfo.tokenId;
   const salt = saltForParent(effectiveTokenIdSalt);
 
-  // Final UserRegistry address: paste path is trivially the user-supplied
-  // address; deploy path uses the eth_call simulation result.
-  const predictedRegistry: Address | undefined =
-    registry.source === "paste"
-      ? (registry.pasteAddress as Address)
-      : simRegistry;
+  // Final UserRegistry address: paste path uses the user-supplied address;
+  // deploy path uses pure CREATE2 derivation from (admin, salt). No RPC.
+  const predictedRegistry: Address | undefined = useMemo(() => {
+    if (registry.source === "paste") return registry.pasteAddress as Address;
+    if (freshDeploy && freshSalt === undefined) return undefined;
+    return predictUserRegistryAddress(registry.admin, effectiveTokenIdSalt);
+  }, [registry, freshDeploy, freshSalt, effectiveTokenIdSalt]);
 
   // OpenRegistrar address derives synchronously from (registry, salt). Pure.
   const predictedRegistrar: Address | undefined = useMemo(() => {
@@ -112,8 +110,6 @@ export function DeployScreen({
 
   // Seed / clear the random fresh salt. Flipping freshDeploy on picks a new
   // random salt; flipping it off clears it so we revert to parentInfo.tokenId.
-  // Collisions in a 256-bit space are astronomically unlikely, but if the
-  // predict effect's simulate call fails we'll roll another one below.
   useEffect(() => {
     if (freshDeploy) {
       setFreshSalt(randomSalt());
@@ -122,88 +118,34 @@ export function DeployScreen({
     }
   }, [freshDeploy]);
 
-  // Resolve the predicted UserRegistry address.
-  //   - Canonical mode (freshDeploy=false): salt = parentInfo.tokenId. Look
-  //     up any existing (admin, salt) deploy first via the factory's events
-  //     and reuse it (simulating would revert on CREATE2 collision). If none
-  //     exists, simulate to get the address the next deploy would land at.
-  //   - Fresh mode (freshDeploy=true): use the random salt we picked. If
-  //     simulate reverts (effectively only possible on a freak collision),
-  //     pick another random salt and retry. Capped at MAX_TRIES.
+  // Is a UserRegistry already deployed at the predicted address? Single
+  // getCode call — no event scan, no block range limits. In fresh-deploy mode
+  // a non-empty code means a 256-bit-random-salt collision (astronomically
+  // unlikely); roll another salt and try again.
   useEffect(() => {
     if (registry.source !== "deploy") return;
-    if (!publicClient) return;
-    if (freshDeploy && freshSalt === undefined) return;
+    if (!predictedRegistry || !publicClient) return;
     let cancelled = false;
-
-    const simulate = async (saltArg: bigint): Promise<Address> => {
-      const {result} = await publicClient.simulateContract({
-        address: SEPOLIA_ADDRESSES.saplingFactory,
-        abi: saplingFactoryAbi,
-        functionName: "deployRegistry",
-        args: [registry.admin, saltArg],
-        account: registry.admin,
-      });
-      return result as Address;
-    };
-
     (async () => {
       try {
-        if (freshDeploy) {
-          const MAX_TRIES = 5;
-          let lastErr: unknown;
-          let saltArg = freshSalt as bigint;
-          for (let i = 0; i < MAX_TRIES; i++) {
-            try {
-              const result = await simulate(saltArg);
-              if (cancelled) return;
-              if (saltArg !== freshSalt) setFreshSalt(saltArg);
-              setSimRegistry(result);
-              setRegistryDeployed(false);
-              setPredictError(undefined);
-              return;
-            } catch (e) {
-              lastErr = e;
-              saltArg = randomSalt();
-            }
-          }
-          if (cancelled) return;
-          setPredictError(
-            lastErr instanceof Error
-              ? lastErr.message
-              : `Fresh deploy: simulate failed after ${MAX_TRIES} random salts`,
-          );
+        const code = await publicClient.getCode({address: predictedRegistry});
+        if (cancelled) return;
+        const exists = !!code && code !== "0x";
+        if (freshDeploy && exists) {
+          setFreshSalt(randomSalt());
           return;
         }
-
-        // Canonical path.
-        const existing = await findExistingUserRegistry(
-          publicClient,
-          registry.admin,
-          parentInfo.tokenId,
-        );
-        if (cancelled) return;
-        if (existing) {
-          setSimRegistry(existing);
-          setRegistryDeployed(true);
-          setPredictError(undefined);
-          return;
-        }
-        const result = await simulate(parentInfo.tokenId);
-        if (cancelled) return;
-        setSimRegistry(result);
-        setRegistryDeployed(false);
+        setRegistryDeployed(exists);
         setPredictError(undefined);
       } catch (e) {
         if (cancelled) return;
         setPredictError(e instanceof Error ? e.message : String(e));
       }
     })();
-
     return () => {
       cancelled = true;
     };
-  }, [registry, freshDeploy, freshSalt, parentInfo.tokenId, publicClient]);
+  }, [registry.source, predictedRegistry, publicClient, freshDeploy]);
 
   // Has the predicted OpenRegistrar already been deployed? The standard CREATE2
   // deployer silently no-ops on collision (returns address(0)) so this wouldn't
