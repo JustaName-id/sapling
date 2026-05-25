@@ -8,8 +8,8 @@ import {RegistryRolesLib} from "@ensv2/registry/libraries/RegistryRolesLib.sol";
 import {EACBaseRolesLib} from "@ensv2/access-control/libraries/EACBaseRolesLib.sol";
 import {LibLabel} from "@ensv2/utils/LibLabel.sol";
 
-import {ISaplingRegistrar} from "../src/ISaplingRegistrar.sol";
-import {SaplingRegistrarBase} from "../src/SaplingRegistrarBase.sol";
+import {ISaplingRegistrar} from "../src/interfaces/ISaplingRegistrar.sol";
+import {SaplingRegistrarBase} from "../src/base/SaplingRegistrarBase.sol";
 
 import {EnsV2Fixture} from "./helpers/EnsV2Fixture.sol";
 

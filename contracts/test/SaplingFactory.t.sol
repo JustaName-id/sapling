@@ -9,7 +9,7 @@ import {EACBaseRolesLib} from "@ensv2/access-control/libraries/EACBaseRolesLib.s
 import {RegistryRolesLib} from "@ensv2/registry/libraries/RegistryRolesLib.sol";
 
 import {SaplingFactory} from "../src/SaplingFactory.sol";
-import {ISaplingFactory} from "../src/ISaplingFactory.sol";
+import {ISaplingFactory} from "../src/interfaces/ISaplingFactory.sol";
 
 import {EnsV2Fixture} from "./helpers/EnsV2Fixture.sol";
 

@@ -6,9 +6,9 @@ import {IRegistry} from "@ensv2/registry/interfaces/IRegistry.sol";
 import {EACBaseRolesLib} from "@ensv2/access-control/libraries/EACBaseRolesLib.sol";
 import {LibLabel} from "@ensv2/utils/LibLabel.sol";
 
-import {IOpenRegistrar} from "./IOpenRegistrar.sol";
-import {ISaplingRegistrar} from "./ISaplingRegistrar.sol";
-import {SaplingRegistrarBase} from "./SaplingRegistrarBase.sol";
+import {IOpenRegistrar} from "../interfaces/IOpenRegistrar.sol";
+import {ISaplingRegistrar} from "../interfaces/ISaplingRegistrar.sol";
+import {SaplingRegistrarBase} from "../base/SaplingRegistrarBase.sol";
 
 /// @title OpenRegistrar
 /// @notice Permissionless per-domain registrar for ENSv2 user registries.

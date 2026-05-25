@@ -6,7 +6,7 @@ import {VerifiableFactory} from "@ensdomains/verifiable-factory/VerifiableFactor
 import {UserRegistry} from "@ensv2/registry/UserRegistry.sol";
 import {EACBaseRolesLib} from "@ensv2/access-control/libraries/EACBaseRolesLib.sol";
 
-import {ISaplingFactory} from "./ISaplingFactory.sol";
+import {ISaplingFactory} from "./interfaces/ISaplingFactory.sol";
 
 /// @title SaplingFactory
 /// @notice Canonical entry point for deploying Sapling user registries.

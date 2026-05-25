@@ -11,7 +11,7 @@ import {RegistryRolesLib} from "@ensv2/registry/libraries/RegistryRolesLib.sol";
 import {LibLabel} from "@ensv2/utils/LibLabel.sol";
 
 import {SaplingFactory} from "../src/SaplingFactory.sol";
-import {OpenRegistrar} from "../src/OpenRegistrar.sol";
+import {OpenRegistrar} from "../src/registrars/OpenRegistrar.sol";
 
 /// @notice End-to-end Sapling deploy for the `leooo.eth` parent name on
 ///         Sepolia, exercising the full SaplingFactory flow. Deploys the

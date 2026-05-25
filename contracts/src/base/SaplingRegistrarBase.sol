@@ -5,7 +5,7 @@ import {IPermissionedRegistry} from "@ensv2/registry/interfaces/IPermissionedReg
 import {IRegistry} from "@ensv2/registry/interfaces/IRegistry.sol";
 import {RegistryRolesLib} from "@ensv2/registry/libraries/RegistryRolesLib.sol";
 
-import {ISaplingRegistrar} from "./ISaplingRegistrar.sol";
+import {ISaplingRegistrar} from "../interfaces/ISaplingRegistrar.sol";
 
 /// @title SaplingRegistrarBase
 /// @notice Abstract base for Sapling registrar templates. Implements the canonical read surface.

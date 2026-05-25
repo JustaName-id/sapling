@@ -9,9 +9,9 @@ import {RegistryRolesLib} from "@ensv2/registry/libraries/RegistryRolesLib.sol";
 import {IStandardRegistry} from "@ensv2/registry/interfaces/IStandardRegistry.sol";
 import {LibLabel} from "@ensv2/utils/LibLabel.sol";
 
-import {OpenRegistrar} from "../src/OpenRegistrar.sol";
-import {IOpenRegistrar} from "../src/IOpenRegistrar.sol";
-import {ISaplingRegistrar} from "../src/ISaplingRegistrar.sol";
+import {OpenRegistrar} from "../src/registrars/OpenRegistrar.sol";
+import {IOpenRegistrar} from "../src/interfaces/IOpenRegistrar.sol";
+import {ISaplingRegistrar} from "../src/interfaces/ISaplingRegistrar.sol";
 
 import {EnsV2Fixture} from "./helpers/EnsV2Fixture.sol";
 
