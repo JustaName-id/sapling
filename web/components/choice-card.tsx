@@ -71,7 +71,7 @@ export function ChoiceCard({
           </span>
         )}
       </div>
-      <p className="m-0 text-[12.5px] text-fg-3 leading-[1.5]">{body}</p>
+      <p className="m-0 text-[12.5px] text-fg-3 leading-normal">{body}</p>
     </button>
   );
 }

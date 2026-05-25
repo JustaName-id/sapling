@@ -343,8 +343,3 @@
     transform: translate(-50%, 6px);
   }
 }
-@keyframes sapling-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}

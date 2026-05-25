@@ -33,7 +33,7 @@ export function RegistrarScreen({
   return (
     <div className="max-w-[720px] mx-auto w-full">
       <div className="mb-8">
-        <h1 className="text-[28px] font-bold tracking-[-0.025em] m-0 mb-2 leading-[1.15] text-fg">
+        <h1 className="text-[28px] font-bold tracking-tight m-0 mb-2 leading-[1.15] text-fg">
           Registration policy
         </h1>
         <p className="m-0 text-fg-3 text-[15px] max-w-[56ch]">
@@ -45,7 +45,7 @@ export function RegistrarScreen({
 
       <div className="mb-2">
         <p className="text-[14px] font-medium text-fg m-0 mb-1">Mode</p>
-        <p className="text-[13px] text-fg-3 m-0 mb-3 leading-[1.5] max-w-[56ch]">
+        <p className="text-[13px] text-fg-3 m-0 mb-3 leading-normal max-w-[56ch]">
           How users acquire subnames.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

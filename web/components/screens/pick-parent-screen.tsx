@@ -88,7 +88,7 @@ export function PickParentScreen({
   return (
     <div className="max-w-[720px] mx-auto w-full">
       <div className="mb-8">
-        <h1 className="text-[28px] font-bold tracking-[-0.025em] m-0 mb-2 leading-[1.15] text-fg">
+        <h1 className="text-[28px] font-bold tracking-tight m-0 mb-2 leading-[1.15] text-fg">
           Pick a parent name
         </h1>
         <p className="m-0 text-fg-3 text-[15px] max-w-[56ch]">
@@ -103,7 +103,7 @@ export function PickParentScreen({
             <p className="text-fg font-medium m-0 mb-1 text-[14px]">
               Connect a wallet to continue
             </p>
-            <p className="text-fg-3 text-[13px] m-0 leading-[1.5] max-w-[52ch]">
+            <p className="text-fg-3 text-[13px] m-0 leading-normal max-w-[52ch]">
               Sapling shows the{" "}
               <span className="font-mono">.eth</span> names owned by the
               connected wallet so you can pick one as the parent for your new

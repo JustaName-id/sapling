@@ -62,7 +62,7 @@ export function RegistryScreen({
   return (
     <div className="max-w-[720px] mx-auto w-full">
       <div className="mb-8">
-        <h1 className="text-[28px] font-bold tracking-[-0.025em] m-0 mb-2 leading-[1.15] text-fg">
+        <h1 className="text-[28px] font-bold tracking-tight m-0 mb-2 leading-[1.15] text-fg">
           Subname ownership
         </h1>
         <p className="m-0 text-fg-3 text-[15px] max-w-[56ch]">
@@ -340,7 +340,7 @@ function FieldRow({
     <div className="py-5 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-3 md:gap-8 items-start border-b border-border last:border-b-0">
       <div>
         <p className="text-[14px] font-medium text-fg m-0 mb-1">{label}</p>
-        <p className="text-[13px] text-fg-3 m-0 leading-[1.5] max-w-[42ch]">
+        <p className="text-[13px] text-fg-3 m-0 leading-normal max-w-[42ch]">
           {help}
         </p>
       </div>

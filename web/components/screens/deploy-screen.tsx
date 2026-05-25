@@ -448,7 +448,7 @@ export function DeployScreen({
   return (
     <div className="max-w-[720px] mx-auto w-full">
       <div className="mb-8">
-        <h1 className="text-[28px] font-bold tracking-[-0.025em] m-0 mb-2 leading-[1.15] text-fg">
+        <h1 className="text-[28px] font-bold tracking-tight m-0 mb-2 leading-[1.15] text-fg">
           {head}
         </h1>
         <p className="m-0 text-fg-3 text-[15px] max-w-[60ch]">
@@ -724,8 +724,7 @@ function Spinner() {
   return (
     <span
       aria-hidden="true"
-      className="block w-2.5 h-2.5 rounded-full border border-current border-t-transparent"
-      style={{animation: "sapling-spin 0.7s linear infinite"}}
+      className="block w-2.5 h-2.5 rounded-full border border-current border-t-transparent animate-spin"
     />
   );
 }

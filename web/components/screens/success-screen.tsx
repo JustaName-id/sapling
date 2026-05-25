@@ -47,7 +47,7 @@ export function SuccessScreen({
           </svg>
           Confirmed on {network === "mainnet" ? "mainnet" : "sepolia"}
         </div>
-        <h1 className="text-[28px] font-semibold tracking-[-0.025em] m-0 mb-2 text-fg">
+        <h1 className="text-[28px] font-semibold tracking-tight m-0 mb-2 text-fg">
           Deployed.
         </h1>
         <p className="m-0 text-fg-3 max-w-[56ch]">
