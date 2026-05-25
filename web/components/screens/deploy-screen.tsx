@@ -75,31 +75,38 @@ export function DeployScreen({
   // Whether the predicted addresses already have code on-chain. If they do,
   // we must skip those deploy calls in the batch — otherwise the matching
   // CREATE / CREATE2 would revert and (with forceAtomic) sink the whole bundle.
-  const [registryDeployed, setRegistryDeployed] = useState<boolean>(false);
   const [registrarDeployed, setRegistrarDeployed] = useState<boolean>(false);
+  // Collapsed by default during review; auto-opens once signing begins so
+  // the user sees row-level progress.
+  const [callsOpen, setCallsOpen] = useState<boolean>(false);
 
   const {live, skipped} = buildBatch(parent, registry, registrar);
-  const gasPrice = network === "mainnet" ? 12 : 1.2;
-  const gasEst = 240_000 + live.length * 62_000;
-  const ethCost = (gasEst * gasPrice) / 1e9;
 
-  // "Deploy fresh" mode: use a random salt so a new registry/registrar pair is
-  // produced even when a prior deploy already exists at the canonical salt.
-  // Default mode (false) uses parentInfo.tokenId as salt and reuses any
-  // existing deploy idempotently.
-  const [freshDeploy, setFreshDeploy] = useState(false);
+  // The "reuse vs deploy fresh" decision is made on the Registry screen and
+  // carried here via `registry.source`. Source = paste → we wire the pasted
+  // address. Source = deploy → we always deploy a new registry.
+  //
+  // If the predicted CREATE2 address happens to be occupied (because the user
+  // previously deployed under (admin, parentTokenId) and then unwired it, or
+  // because they chose "Deploy fresh" while the existing registry sits at the
+  // canonical salt), we silently roll a random salt until we land on an empty
+  // slot. This is a contract concern, not a user concern — no UI.
   const [freshSalt, setFreshSalt] = useState<bigint | undefined>(undefined);
-  const effectiveTokenIdSalt =
-    freshDeploy && freshSalt !== undefined ? freshSalt : parentInfo.tokenId;
+  const effectiveTokenIdSalt = freshSalt ?? parentInfo.tokenId;
   const salt = saltForParent(effectiveTokenIdSalt);
+
+  // Reset the rolled salt whenever the source flips back to paste, so a later
+  // toggle back to deploy starts from the canonical slot again.
+  useEffect(() => {
+    if (registry.source !== "deploy") setFreshSalt(undefined);
+  }, [registry.source]);
 
   // Final UserRegistry address: paste path uses the user-supplied address;
   // deploy path uses pure CREATE2 derivation from (admin, salt). No RPC.
   const predictedRegistry: Address | undefined = useMemo(() => {
     if (registry.source === "paste") return registry.pasteAddress as Address;
-    if (freshDeploy && freshSalt === undefined) return undefined;
     return predictUserRegistryAddress(registry.admin, effectiveTokenIdSalt);
-  }, [registry, freshDeploy, freshSalt, effectiveTokenIdSalt]);
+  }, [registry, effectiveTokenIdSalt]);
 
   // OpenRegistrar address derives synchronously from (registry, salt). Pure.
   const predictedRegistrar: Address | undefined = useMemo(() => {
@@ -108,20 +115,10 @@ export function DeployScreen({
     return predictOpenRegistrarAddress(predictedRegistry, salt);
   }, [registrar, predictedRegistry, salt]);
 
-  // Seed / clear the random fresh salt. Flipping freshDeploy on picks a new
-  // random salt; flipping it off clears it so we revert to parentInfo.tokenId.
-  useEffect(() => {
-    if (freshDeploy) {
-      setFreshSalt(randomSalt());
-    } else {
-      setFreshSalt(undefined);
-    }
-  }, [freshDeploy]);
-
-  // Is a UserRegistry already deployed at the predicted address? Single
-  // getCode call — no event scan, no block range limits. In fresh-deploy mode
-  // a non-empty code means a 256-bit-random-salt collision (astronomically
-  // unlikely); roll another salt and try again.
+  // If the predicted slot is occupied, roll a fresh salt and let the memo
+  // recompute — the next pass will check the new address. Single getCode per
+  // attempt; converges in one iteration except in cryptographically-vanishing
+  // collision cases.
   useEffect(() => {
     if (registry.source !== "deploy") return;
     if (!predictedRegistry || !publicClient) return;
@@ -131,11 +128,10 @@ export function DeployScreen({
         const code = await publicClient.getCode({address: predictedRegistry});
         if (cancelled) return;
         const exists = !!code && code !== "0x";
-        if (freshDeploy && exists) {
+        if (exists) {
           setFreshSalt(randomSalt());
           return;
         }
-        setRegistryDeployed(exists);
         setPredictError(undefined);
       } catch (e) {
         if (cancelled) return;
@@ -145,7 +141,7 @@ export function DeployScreen({
     return () => {
       cancelled = true;
     };
-  }, [registry.source, predictedRegistry, publicClient, freshDeploy]);
+  }, [registry.source, predictedRegistry, publicClient]);
 
   // Has the predicted OpenRegistrar already been deployed? The standard CREATE2
   // deployer silently no-ops on collision (returns address(0)) so this wouldn't
@@ -201,10 +197,9 @@ export function DeployScreen({
     registrarAddr: Address,
   ): {to: Address; data: Hex}[] => {
     const calls: {to: Address; data: Hex}[] = [];
-    // Skip the registry deploy if a UserRegistry already lives at the predicted
-    // address — VerifiableFactory's `new UUPSProxy{salt}` reverts on collision,
-    // which (with forceAtomic) would sink the whole bundle.
-    if (registry.source === "deploy" && !registryDeployed) {
+    // Source=deploy → always deploy. The salt-rolling effect guarantees the
+    // predicted address is empty by the time we get here.
+    if (registry.source === "deploy") {
       calls.push({
         to: SEPOLIA_ADDRESSES.saplingFactory,
         data: encodeFunctionData({
@@ -421,6 +416,12 @@ export function DeployScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-open the call inspector once signing/broadcasting starts so the user
+  // sees row-by-row status without having to fish for the disclosure.
+  useEffect(() => {
+    if (phase !== "review") setCallsOpen(true);
+  }, [phase]);
+
   const inFlight = phase !== "review" && phase !== "done";
   const head =
     phase === "review"
@@ -431,169 +432,140 @@ export function DeployScreen({
           ? "Broadcasting"
           : "Confirming";
 
+  const oneLineSubhead =
+    phase === "review"
+      ? `Deploying your subname registry under ${parent}. ${
+          batchCapable === false
+            ? `Sign ${live.length} transactions in order.`
+            : "One signature, " + live.length + " actions."
+        }`
+      : phase === "signing"
+        ? "Confirm in your wallet."
+        : phase === "broadcasting"
+          ? "Sending the batch to the network."
+          : "Walking the batch to your new registry.";
+
   return (
-    <div className="max-w-[960px] mx-auto w-full">
+    <div className="max-w-[720px] mx-auto w-full">
       <div className="mb-8">
         <h1 className="text-[28px] font-bold tracking-[-0.025em] m-0 mb-2 leading-[1.15] text-fg">
           {head}
         </h1>
         <p className="m-0 text-fg-3 text-[15px] max-w-[60ch]">
-          {phase === "review" &&
-            "Review the calls below. Sign each to deploy your subname registry."}
-          {phase === "signing" && "Confirm in your wallet."}
-          {phase === "broadcasting" && "Sending the batch to the network."}
-          {phase === "confirming" &&
-            "Walking the batch to your new registry."}
+          {oneLineSubhead}
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div>
-          <div className="text-[11px] font-mono uppercase tracking-wider text-fg-3 mb-3">
-            Summary
-          </div>
-          <div className="sapling-card px-4 py-1">
-            <SummaryRow k="Parent" v={<span className="font-mono">{parent}</span>} />
-            <SummaryRow
-              k="Network"
-              v={network === "mainnet" ? "Ethereum Mainnet" : "Sepolia"}
-            />
-            <SummaryRow
-              k="UserRegistry"
-              v={
-                registry.source === "deploy" ? (
-                  predictedRegistry ? (
-                    <span className="inline-flex items-center gap-2">
-                      {registryDeployed ? "Reusing existing" : "Deploy new"} ·{" "}
-                      <AddrPill value={predictedRegistry} />
-                    </span>
-                  ) : (
-                    <span className="text-fg-3">Deploy new · computing…</span>
-                  )
-                ) : (
-                  <span className="inline-flex items-center gap-2">
-                    Reuse · <AddrPill value={registry.pasteAddress} />
-                  </span>
-                )
-              }
-            />
-            {registry.source === "deploy" &&
-              registryDeployed &&
-              !freshDeploy && (
-                <SummaryRow
-                  k=""
-                  v={
-                    <button
-                      type="button"
-                      className="text-[12px] text-fg-3 underline hover:text-fg"
-                      onClick={() => setFreshDeploy(true)}
-                    >
-                      Deploy a fresh registry instead
-                    </button>
-                  }
-                />
-              )}
-            {registry.source === "deploy" && freshDeploy && (
-              <SummaryRow
-                k=""
-                v={
-                  <span className="inline-flex items-center gap-2 text-[12px] text-fg-3">
-                    Fresh-deploy mode · random salt{" "}
-                    {freshSalt !== undefined && (
-                      <span className="font-mono">
-                        {`0x${freshSalt.toString(16).padStart(64, "0").slice(0, 8)}…`}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      className="underline hover:text-fg"
-                      onClick={() => setFreshDeploy(false)}
-                    >
-                      reuse instead
-                    </button>
-                  </span>
-                }
-              />
-            )}
-            {registry.source === "deploy" && (
-              <>
-                <SummaryRow
-                  k="Admin"
-                  v={<AddrPill value={registry.admin} />}
-                />
-                <SummaryRow
-                  k="Upgradeable"
-                  v={registry.upgradeable ? "Yes" : "No, immutable"}
-                />
-              </>
-            )}
-            <SummaryRow
-              k="Registrar"
-              v={
-                registrar.source === "deploy" ? (
-                  predictedRegistrar ? (
-                    <span className="inline-flex items-center gap-2">
-                      {registrarDeployed ? "Reusing existing" : "Deploy new"} ·
-                      Open mode · <AddrPill value={predictedRegistrar} />
-                    </span>
-                  ) : (
-                    <span className="text-fg-3">
-                      Deploy new · Open mode · computing…
-                    </span>
-                  )
-                ) : (
-                  <span className="inline-flex items-center gap-2">
-                    Reuse · <AddrPill value={registrar.pasteAddress} />
-                  </span>
-                )
-              }
-            />
-          </div>
-
-        </div>
-
-        <div>
-          <div className="text-[11px] font-mono uppercase tracking-wider text-fg-3 mb-3">
-            {batchCapable ? "Batch · one signature" : "Batch · sign each in order"}
-          </div>
-          <div className="sapling-card">
-            <div className="py-3 px-4 border-b border-border text-[11px] font-mono uppercase tracking-wider text-fg-3 flex justify-between">
-              <span>
-                {live.length} call{live.length === 1 ? "" : "s"}
-                {skipped.length > 0 && ` · ${skipped.length} skipped`}
+      <div className="sapling-card px-4 py-1 mb-4">
+        <SummaryRow k="Parent" v={<span className="font-mono">{parent}</span>} />
+        <SummaryRow
+          k="Network"
+          v={network === "mainnet" ? "Ethereum Mainnet" : "Sepolia"}
+        />
+        <SummaryRow
+          k="UserRegistry"
+          v={
+            registry.source === "deploy" ? (
+              <span className="inline-flex items-center gap-2">
+                Deploy new · <AddrPill value={predictedRegistry as Address} />
               </span>
-              <span>
-                {batchCapable === undefined
-                  ? "checking wallet…"
-                  : batchCapable
-                    ? "1 signature · atomic"
-                    : `${live.length} signature${live.length === 1 ? "" : "s"}`}
+            ) : (
+              <span className="inline-flex items-center gap-2">
+                Reuse · <AddrPill value={registry.pasteAddress} />
               </span>
-            </div>
-            {live.map((c, i) => (
-              <TxRow
-                key={`l${i}`}
-                idx={i + 1}
-                call={c}
-                status={inFlight || phase === "done" ? statuses[i] : undefined}
-                txHash={txHashes[i]}
-                network={network}
-              />
-            ))}
-            {skipped.map((c, i) => (
-              <TxRow key={`s${i}`} idx={0} call={c} skipped network={network} />
-            ))}
-          </div>
-
-          {skipped.length > 0 && phase === "review" && (
-            <p className="mt-3 text-[12.5px] text-fg-3">
-              {skipped.length} call{skipped.length > 1 ? "s" : ""} skipped
-              because you&apos;re reusing existing contract
-              {skipped.length > 1 ? "s" : ""}.
-            </p>
-          )}
-        </div>
+            )
+          }
+        />
+        {registry.source === "deploy" && (
+          <>
+            <SummaryRow k="Admin" v={<AddrPill value={registry.admin} />} />
+            <SummaryRow
+              k="Upgradeable"
+              v={registry.upgradeable ? "Yes" : "No, immutable"}
+            />
+          </>
+        )}
+        <SummaryRow
+          k="Registrar"
+          v={
+            registrar.source === "deploy" ? (
+              predictedRegistrar ? (
+                <span className="inline-flex items-center gap-2">
+                  {registrarDeployed ? "Reusing existing" : "Deploy new"} ·
+                  Open mode · <AddrPill value={predictedRegistrar} />
+                </span>
+              ) : (
+                <span className="text-fg-3">
+                  Deploy new · Open mode · computing…
+                </span>
+              )
+            ) : (
+              <span className="inline-flex items-center gap-2">
+                Reuse · <AddrPill value={registrar.pasteAddress} />
+              </span>
+            )
+          }
+        />
       </div>
+
+      <details
+        className="sapling-card"
+        open={callsOpen}
+        onToggle={e => setCallsOpen((e.target as HTMLDetailsElement).open)}
+      >
+        <summary className="cursor-pointer list-none py-3 px-4 flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-fg-3">
+          <span className="flex items-center gap-2">
+            <svg
+              width="9"
+              height="9"
+              viewBox="0 0 10 10"
+              fill="none"
+              className="transition-transform"
+              style={{transform: callsOpen ? "rotate(90deg)" : "rotate(0)"}}
+            >
+              <path
+                d="M3.5 2L7 5L3.5 8"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Inspect calls · {live.length} action{live.length === 1 ? "" : "s"}
+            {skipped.length > 0 && ` · ${skipped.length} skipped`}
+          </span>
+          <span>
+            {batchCapable === undefined
+              ? "—"
+              : batchCapable
+                ? "1 signature · atomic"
+                : `${live.length} signature${live.length === 1 ? "" : "s"}`}
+          </span>
+        </summary>
+        <div className="border-t border-border">
+          {live.map((c, i) => (
+            <TxRow
+              key={`l${i}`}
+              idx={i + 1}
+              call={c}
+              status={inFlight || phase === "done" ? statuses[i] : undefined}
+              txHash={txHashes[i]}
+              network={network}
+            />
+          ))}
+          {skipped.map((c, i) => (
+            <TxRow key={`s${i}`} idx={0} call={c} skipped network={network} />
+          ))}
+        </div>
+      </details>
+
+      {skipped.length > 0 && phase === "review" && (
+        <p className="mt-3 text-[12.5px] text-fg-3">
+          {skipped.length} call{skipped.length > 1 ? "s" : ""} skipped because
+          you&apos;re reusing existing contract
+          {skipped.length > 1 ? "s" : ""}.
+        </p>
+      )}
 
       {predictError && phase === "review" && (
         <div className="mt-6 sapling-card p-4 border-l-4" style={{borderLeftColor: "var(--danger)"}}>
@@ -680,7 +652,7 @@ function TxRow({
         skipped ? "opacity-40" : ""
       }`}
     >
-      <div className="font-mono text-[11px] text-fg-4 w-4 flex-shrink-0 pt-0.5">
+      <div className="font-mono text-[11px] text-fg-4 w-4 shrink-0 pt-0.5">
         {skipped ? "–" : String(idx).padStart(2, "0")}
       </div>
       <div
@@ -710,7 +682,7 @@ function TxRow({
           </a>
         )}
       </div>
-      <div className="text-[10.5px] font-mono uppercase tracking-wider flex-shrink-0 pt-0.5 flex items-center gap-1.5">
+      <div className="text-[10.5px] font-mono uppercase tracking-wider shrink-0 pt-0.5 flex items-center gap-1.5">
         {skipped ? (
           <span className="text-fg-4">skipped</span>
         ) : status === "pending" ? (
