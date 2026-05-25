@@ -7,10 +7,12 @@ import {useConnectModal} from "@rainbow-me/rainbowkit";
 import {
   fetchOwnedEthNames,
   formatExpiry,
+  isSubname,
   resolveAvatars,
   type OwnedName,
 } from "@/lib/ens";
 import {EnsAvatar} from "@/components/ens-avatar";
+import {Toggle} from "@/components/toggle";
 
 type Status = "idle" | "loading" | "loaded" | "error";
 
@@ -34,6 +36,7 @@ export function PickParentScreen({
   const [names, setNames] = useState<OwnedName[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [manualName, setManualName] = useState("");
+  const [showSubnames, setShowSubnames] = useState(false);
 
   useEffect(() => {
     if (!address) {
@@ -68,6 +71,8 @@ export function PickParentScreen({
     return () => abort.abort();
   }, [address, publicClient]);
 
+  const subnameCount = names.filter(n => isSubname(n.name)).length;
+  const visibleOwned = showSubnames ? names : names.filter(n => !isSubname(n.name));
   const display: OwnedName[] =
     manualName.trim().length > 0
       ? [
@@ -78,7 +83,7 @@ export function PickParentScreen({
             texts: [],
           },
         ]
-      : names;
+      : visibleOwned;
 
   return (
     <div className="max-w-[720px] mx-auto w-full">
@@ -195,6 +200,20 @@ export function PickParentScreen({
                   />
                 </svg>
               </a>
+            </div>
+          )}
+
+          {subnameCount > 0 && manualName.trim().length === 0 && (
+            <div className="flex items-center justify-between gap-3 mb-3 px-1 text-[13px] text-fg-3">
+              <span>
+                Show subnames you own
+                <span className="ml-1 text-fg-4">({subnameCount})</span>
+              </span>
+              <Toggle
+                checked={showSubnames}
+                onChange={setShowSubnames}
+                ariaLabel="Show subnames you own"
+              />
             </div>
           )}
 
