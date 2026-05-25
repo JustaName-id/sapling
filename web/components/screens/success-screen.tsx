@@ -1,7 +1,7 @@
 "use client";
 
 import {type Address} from "viem";
-import {Address as AddrPill} from "@/components/sapling/address";
+import {Address as AddrPill} from "@/components/address";
 
 export function SuccessScreen({
   parent,

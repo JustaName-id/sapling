@@ -4,27 +4,27 @@ import {useEffect, useMemo, useState} from "react";
 import {useAccount, usePublicClient} from "wagmi";
 import {type Address, type PublicClient} from "viem";
 
-import {BrandMark} from "@/components/sapling/brand-mark";
+import {BrandMark} from "@/components/brand-mark";
 import {ConnectButton} from "@/components/connect-button";
-import {Footer} from "@/components/sapling/footer";
-import {StepIndicator} from "@/components/sapling/step-indicator";
-import {ToastHost} from "@/components/sapling/toast";
+import {Footer} from "@/components/footer";
+import {StepIndicator} from "@/components/step-indicator";
+import {ToastHost} from "@/components/toast";
 
 import {
   ConnectScreen,
   type Network,
-} from "@/components/sapling/screens/connect-screen";
-import {PickParentScreen} from "@/components/sapling/screens/pick-parent-screen";
+} from "@/components/screens/connect-screen";
+import {PickParentScreen} from "@/components/screens/pick-parent-screen";
 import {
   RegistryScreen,
   type RegistryConfig,
-} from "@/components/sapling/screens/registry-screen";
+} from "@/components/screens/registry-screen";
 import {
   RegistrarScreen,
   type RegistrarConfig,
-} from "@/components/sapling/screens/registrar-screen";
-import {DeployScreen} from "@/components/sapling/screens/deploy-screen";
-import {SuccessScreen} from "@/components/sapling/screens/success-screen";
+} from "@/components/screens/registrar-screen";
+import {DeployScreen} from "@/components/screens/deploy-screen";
+import {SuccessScreen} from "@/components/screens/success-screen";
 
 import {SEPOLIA_ADDRESSES, ethRegistryAbi} from "@/lib/sapling";
 import {labelhash} from "@/lib/labelhash";

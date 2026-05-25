@@ -10,7 +10,7 @@ import {
   resolveAvatars,
   type OwnedName,
 } from "@/lib/ens";
-import {EnsAvatar} from "@/components/sapling/ens-avatar";
+import {EnsAvatar} from "@/components/ens-avatar";
 
 type Status = "idle" | "loading" | "loaded" | "error";
 

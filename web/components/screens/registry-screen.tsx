@@ -2,9 +2,9 @@
 
 import {useEffect} from "react";
 import {type Address, isAddress} from "viem";
-import {Address as AddrPill} from "@/components/sapling/address";
-import {SourceTabs, type Source} from "@/components/sapling/source-tabs";
-import {Toggle} from "@/components/sapling/toggle";
+import {Address as AddrPill} from "@/components/address";
+import {SourceTabs, type Source} from "@/components/source-tabs";
+import {Toggle} from "@/components/toggle";
 
 export type RegistryConfig = {
   source: Source;

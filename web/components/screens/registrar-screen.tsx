@@ -1,9 +1,9 @@
 "use client";
 
 import {isAddress} from "viem";
-import {SourceTabs, type Source} from "@/components/sapling/source-tabs";
-import {RadioRow} from "@/components/sapling/radio-row";
-import {Toggle} from "@/components/sapling/toggle";
+import {SourceTabs, type Source} from "@/components/source-tabs";
+import {RadioRow} from "@/components/radio-row";
+import {Toggle} from "@/components/toggle";
 
 export type RegistrarConfig = {
   source: Source;

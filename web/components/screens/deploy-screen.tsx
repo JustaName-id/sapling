@@ -4,7 +4,7 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import {encodeFunctionData, type Address, type Hex} from "viem";
 import {usePublicClient, useWalletClient} from "wagmi";
 
-import {Address as AddrPill, shortAddr} from "@/components/sapling/address";
+import {Address as AddrPill, shortAddr} from "@/components/address";
 import {
   ROLE_REGISTRAR,
   SEPOLIA_ADDRESSES,

@@ -1,6 +1,6 @@
 "use client";
 
-import {SaplingDrawing} from "@/components/sapling/sapling-drawing";
+import {SaplingDrawing} from "@/components/sapling-drawing";
 
 export type Network = "mainnet" | "sepolia";
 
