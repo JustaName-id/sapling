@@ -1,7 +1,7 @@
 "use client";
 
 import {isAddress} from "viem";
-import {RadioRow} from "@/components/radio-row";
+import {ChoiceCard} from "@/components/choice-card";
 
 export type RegistrarConfig = {
   source: "deploy" | "paste";
@@ -43,38 +43,36 @@ export function RegistrarScreen({
         </p>
       </div>
 
-      <div className="sapling-card px-6 py-0">
-        <div className="py-5">
-          <div className="mb-3">
-            <p className="text-[14px] font-medium text-fg m-0 mb-1">Mode</p>
-            <p className="text-[13px] text-fg-3 m-0 leading-[1.5] max-w-[56ch]">
-              How users acquire subnames.
-            </p>
-          </div>
-          <div>
-            <RadioRow
-              selected={!usingCustom && registrar.mode === "open"}
-              onClick={() =>
-                setRegistrar({...registrar, source: "deploy", mode: "open"})
-              }
-              title="Open"
-              help="Anyone can register a subname under your parent. No fee."
-            />
-            <RadioRow
-              disabled
-              selected={false}
-              title="Paid"
-              badge="Soon"
-              help="Anyone can register, but pays a fee per name."
-            />
-            <RadioRow
-              disabled
-              selected={false}
-              title="Allowlist"
-              badge="Soon"
-              help="Only addresses on your allowlist can register."
-            />
-          </div>
+      <div className="mb-2">
+        <p className="text-[14px] font-medium text-fg m-0 mb-1">Mode</p>
+        <p className="text-[13px] text-fg-3 m-0 mb-3 leading-[1.5] max-w-[56ch]">
+          How users acquire subnames.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <ChoiceCard
+            selected={!usingCustom && registrar.mode === "open"}
+            onClick={() =>
+              setRegistrar({...registrar, source: "deploy", mode: "open"})
+            }
+            title="Open"
+            body="Anyone can register a subname under your parent. No fee."
+          />
+          <ChoiceCard
+            disabled
+            selected={false}
+            onClick={() => {}}
+            title="Paid"
+            badge="Soon"
+            body="Anyone can register, but pays a fee per name."
+          />
+          <ChoiceCard
+            disabled
+            selected={false}
+            onClick={() => {}}
+            title="Allowlist"
+            badge="Soon"
+            body="Only addresses on your allowlist can register."
+          />
         </div>
       </div>
 

@@ -7,7 +7,7 @@ export function Footer() {
         <span style={{color: "#E55353"}} aria-label="love">
           ♥
         </span>{" "}
-        by Justaname
+        by Justalab
       </span>
       <span className="flex justify-end">
         <a

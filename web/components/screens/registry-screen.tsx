@@ -3,6 +3,7 @@
 import {useEffect} from "react";
 import {type Address, isAddress} from "viem";
 import {Address as AddrPill, shortAddr} from "@/components/address";
+import {ChoiceCard} from "@/components/choice-card";
 import {Toggle} from "@/components/toggle";
 
 export type RegistryConfig = {
@@ -323,73 +324,6 @@ export function RegistryScreen({
         </button>
       </div>
     </div>
-  );
-}
-
-function ChoiceCard({
-  selected,
-  onClick,
-  title,
-  body,
-  tone = "default",
-}: {
-  selected: boolean;
-  onClick: () => void;
-  title: string;
-  body: string;
-  tone?: "default" | "warning";
-}) {
-  const borderColor = selected
-    ? tone === "warning"
-      ? "var(--danger)"
-      : "var(--fg)"
-    : "var(--border)";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={selected}
-      className="text-left p-4 rounded-[12px] border bg-bg-elev transition-all hover:border-border-strong"
-      style={{
-        borderColor,
-        borderWidth: selected ? 2 : 1,
-        padding: selected ? "15px" : "16px",
-      }}
-    >
-      <div className="flex items-center gap-2 mb-1.5">
-        <span
-          className="w-3.5 h-3.5 rounded-full border flex items-center justify-center"
-          style={{
-            borderColor: selected
-              ? tone === "warning"
-                ? "var(--danger)"
-                : "var(--fg)"
-              : "var(--border-strong)",
-            borderWidth: 1.5,
-          }}
-        >
-          {selected && (
-            <span
-              className="w-1.5 h-1.5 rounded-full"
-              style={{
-                background:
-                  tone === "warning" ? "var(--danger)" : "var(--fg)",
-              }}
-            />
-          )}
-        </span>
-        <span
-          className="text-[14px] font-medium"
-          style={{
-            color:
-              selected && tone === "warning" ? "var(--danger)" : "var(--fg)",
-          }}
-        >
-          {title}
-        </span>
-      </div>
-      <p className="m-0 text-[12.5px] text-fg-3 leading-[1.5]">{body}</p>
-    </button>
   );
 }
 

@@ -686,20 +686,47 @@ function TxRow({
         {skipped ? (
           <span className="text-fg-4">skipped</span>
         ) : status === "pending" ? (
-          <span className="text-fg-4">·  pending</span>
+          <span className="text-fg-4 inline-flex items-center gap-1.5">
+            <span className="block w-1.5 h-1.5 rounded-full border border-current opacity-50" />
+            pending
+          </span>
         ) : status === "submitted" ? (
-          <span className="text-fg-3 inline-flex items-center gap-1">
-            <span className="block w-1.5 h-1.5 rounded-full border border-current" />
-            submitted
+          <span className="text-fg-2 inline-flex items-center gap-1.5">
+            <Spinner />
+            submitting
           </span>
         ) : status === "confirmed" ? (
-          <span className="text-accent inline-flex items-center gap-1">
-            <span className="block w-1.5 h-1.5 rounded-full bg-current" />
+          <span className="text-accent inline-flex items-center gap-1.5">
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 12 12"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M2.5 6.2l2.3 2.3L9.5 3.5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
             confirmed
           </span>
         ) : null}
       </div>
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <span
+      aria-hidden="true"
+      className="block w-2.5 h-2.5 rounded-full border border-current border-t-transparent"
+      style={{animation: "sapling-spin 0.7s linear infinite"}}
+    />
   );
 }
 
