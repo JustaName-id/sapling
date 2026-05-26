@@ -1,6 +1,6 @@
 # Sapling
 
-A no-code way to issue **subnames under ENSv2**.
+Issue **subnames under ENSv2**.
 
 If you own `alice.eth`, Sapling sets up everything your name needs to mint subnames like `bob.alice.eth`, `cafe.alice.eth`, or let other people claim their own. It deploys the contracts behind your name and walks you through the config along the way: who can mint (just you, paying users, an allowlist), what address controls the registry, whether it stays upgradeable, and whether to reuse contracts you already have. The subnames live on Ethereum, resolve everywhere ENS works, and the contracts behind them are yours to control.
 
